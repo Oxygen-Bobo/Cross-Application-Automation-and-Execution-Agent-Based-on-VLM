@@ -27,6 +27,7 @@ class ComputerTools:
 
     def __init__(self):
         self.image_info = None
+        pyautogui.PAUSE = 0.05
 
     def _load_image_info(self, path):
         """Cache the width and height of the latest screenshot."""
@@ -168,6 +169,12 @@ class ComputerTools:
         pyautogui.dragTo(x, y, duration=0.5)
         pyautogui.moveTo(x, y)
 
+    def drag_between(self, x1, y1, x2, y2):
+        """Drag from one absolute coordinate to another."""
+        pyautogui.moveTo(x1, y1, duration=0.1)
+        pyautogui.dragTo(x2, y2, duration=0.35, button="left")
+        pyautogui.moveTo(x2, y2)
+
     def right_click(self, x, y):
         """Right-click at coordinate (x, y)."""
         pyautogui.moveTo(x, y)
@@ -198,6 +205,13 @@ class ComputerTools:
         Positive values scroll up, negative values scroll down.
         """
         pyautogui.scroll(pixels)
+
+    def hscroll(self, pixels):
+        """
+        Scroll horizontally where the platform/backend supports it.
+        Positive values scroll right, negative values scroll left.
+        """
+        pyautogui.hscroll(pixels)
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +531,8 @@ SYSTEM_PROMPT = (
     'and take screenshots.\\n'
     '* This is an interface to a desktop GUI. You do not have access to a '
     'terminal or applications menu. You must click on desktop icons to start '
-    'applications.\\n'
+    'applications. Prefer open_app for launching applications when the app '
+    'name is known.\\n'
     '* Some applications may take time to start or process actions, so you '
     'may need to wait and take successive screenshots to see the results of '
     'your actions. E.g. if you click on Firefox and a window doesn\'t open, '
@@ -535,8 +550,7 @@ SYSTEM_PROMPT = (
     'on the screen.\\n'
     '* `left_click`: Click the left mouse button at a specified (x, y) pixel '
     'coordinate on the screen.\\n'
-    '* `left_click_drag`: Click and drag the cursor to a specified (x, y) '
-    'pixel coordinate on the screen.\\n'
+    '* `left_click_drag`: Click and drag from coordinate1 to coordinate2.\\n'
     '* `right_click`: Click the right mouse button at a specified (x, y) '
     'pixel coordinate on the screen.\\n'
     '* `middle_click`: Click the middle mouse button at a specified (x, y) '
@@ -551,17 +565,23 @@ SYSTEM_PROMPT = (
     '* `terminate`: Terminate the current task and report its completion '
     'status.\\n'
     '* `answer`: Answer a question.\\n'
-    '* `interact`: Resolve the blocking window by interacting with the user.", '
+    '* `interact`: Resolve the blocking window by interacting with the user.\\n'
+    '* `open_app`: Open an application by name using the operating system.", '
     '"enum": ["key", "type", "mouse_move", "left_click", "left_click_drag", '
     '"right_click", "middle_click", "double_click", "triple_click", "scroll", '
-    '"hscroll", "wait", "terminate", "answer", "interact"], "type": "string"}, '
+    '"hscroll", "wait", "terminate", "answer", "interact", "open_app"], "type": "string"}, '
     '"keys": {"description": "Required only by `action=key`.", '
     '"type": "array"}, '
     '"text": {"description": "Required only by `action=type`, `action=answer` '
     'and `action=interact`.", "type": "string"}, '
-    '"coordinate": {"description": "(x, y): The x (pixels from the left edge) '
-    'and y (pixels from the top edge) coordinates to move the mouse to. '
-    'Required only by `action=mouse_move` and `action=left_click_drag`.", '
+    '"app_name": {"description": "Required only by `action=open_app`.", '
+    '"type": "string"}, '
+    '"coordinate": {"description": "(x, y): normalized screen coordinates '
+    'from 0 to 1000. Required by click, mouse_move, and optional for scroll.", '
+    '"type": "array"}, '
+    '"coordinate1": {"description": "Start coordinate for `left_click_drag`.", '
+    '"type": "array"}, '
+    '"coordinate2": {"description": "End coordinate for `left_click_drag`.", '
     '"type": "array"}, '
     '"pixels": {"description": "The amount of scrolling to perform. Positive '
     'values scroll up, negative values scroll down. Required only by '
@@ -590,7 +610,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_messages(image_path, instruction, history_output, model_name, history_n=4):
+def build_messages(image_path, instruction, history_output, model_name, history_n=2):
     """
     Construct the multi-turn message list for the VLM.
 
@@ -770,37 +790,44 @@ class MultimodalLlmWrapper(abc.ABC):
 
 class GUIOwlWrapper(LlmWrapper, MultimodalLlmWrapper):
 
-    RETRY_WAITING_SECONDS = 20
+    RETRY_WAITING_SECONDS = 3
 
     def __init__(
             self,
             api_key: str,
             base_url: str,
             model_name: str,
-            max_retry: int = 10,
+            max_retry: int = 3,
             temperature: float = 0.0,
+            timeout: int = 60,
+            max_tokens: int = 1536,
     ):
         if max_retry <= 0:
-            max_retry = 10
+            max_retry = 3
             print('Max_retry must be positive. Reset it to 3')
-        self.max_retry = min(max_retry, 10)
+        self.max_retry = min(max_retry, 5)
         self.temperature = temperature
+        self.max_tokens = max_tokens
         self.model = model_name
         self.bot = OpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=30
+            timeout=timeout,
         )
 
     def convert_messages_format_to_openaiurl(self, messages):
       converted_messages = []
+      image_cache = {}
       for message in messages:
           new_content = []
           for item in message['content']:
               if list(item.keys())[0] == 'text':
                   new_content.append({'type': 'text', 'text': item['text']})
               elif list(item.keys())[0] == 'image':
-                new_content.append({'type': 'image_url', 'image_url': {'url': image_to_base64(item['image'])}})
+                image_ref = item['image']
+                if image_ref not in image_cache:
+                    image_cache[image_ref] = image_to_base64(image_ref)
+                new_content.append({'type': 'image_url', 'image_url': {'url': image_cache[image_ref]}})
           converted_messages.append({'role': message['role'], 'content': new_content})
 
       return converted_messages
@@ -821,13 +848,19 @@ class GUIOwlWrapper(LlmWrapper, MultimodalLlmWrapper):
         counter = self.max_retry
         wait_seconds = self.RETRY_WAITING_SECONDS
         while counter > 0:
+            attempt = self.max_retry - counter + 1
             try:
-              chat_completion_from_url = self.bot.chat.completions.create(model=self.model, messages=payload, **{})
-              return (chat_completion_from_url.choices[0].message.content, payload, chat_completion_from_url)
+                chat_completion_from_url = self.bot.chat.completions.create(
+                    model=self.model,
+                    messages=payload,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
+                return (chat_completion_from_url.choices[0].message.content, payload, chat_completion_from_url)
             except Exception as e:
+                print(f'Error calling LLM (attempt {attempt}/{self.max_retry}), retrying in {wait_seconds}s...')
+                print(f'  [{type(e).__name__}] {e}')
                 time.sleep(wait_seconds)
-                wait_seconds *= 1
+                wait_seconds = min(wait_seconds * 2, 15)
                 counter -= 1
-                print('Error calling LLM, will retry soon...')
-                print(e)
         return ERROR_CALLING_LLM, None, None

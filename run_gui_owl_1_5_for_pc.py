@@ -32,6 +32,7 @@ API_KEY = "sk-ws-H.RPEIMEH.dBrN.MEQCIFzV2Scc_QsDTvs1a2WVrw2t1TeMMNfqH5qi6Gqof5ar
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen3-vl-plus"
 MAX_STEPS = 50
+POST_ACTION_WAIT_SECONDS = 0.6
 
 
 def rescale_coordinates(action_parameter, resized_width, resized_height):
@@ -40,12 +41,18 @@ def rescale_coordinates(action_parameter, resized_width, resized_height):
     """
     for key in ("coordinate", "coordinate1", "coordinate2"):
         if key in action_parameter:
-            action_parameter[key][0] = int(
-                action_parameter[key][0] / 1000 * resized_width
-            )
-            action_parameter[key][1] = int(
-                action_parameter[key][1] / 1000 * resized_height
-            )
+            x, y = action_parameter[key][:2]
+            action_parameter[key][0] = int(float(x) / 1000 * resized_width)
+            action_parameter[key][1] = int(float(y) / 1000 * resized_height)
+
+
+def clamp_coordinates(action_parameter, screen_width, screen_height):
+    for key in ("coordinate", "coordinate1", "coordinate2"):
+        if key not in action_parameter:
+            continue
+        x, y = action_parameter[key][:2]
+        action_parameter[key][0] = max(0, min(int(x), screen_width - 1))
+        action_parameter[key][1] = max(0, min(int(y), screen_height - 1))
 
 
 def _normalize_coordinate_keys(action_parameter):
@@ -88,17 +95,25 @@ def execute_action(computer_tools, action_parameter):
             action_parameter["coordinate"][0],
             action_parameter["coordinate"][1],
         )
-    elif action_type == "open app":
+    elif action_type in ("open app", "open_app"):
         computer_tools.open_app(action_parameter["app_name"])
     elif action_type in ("key", "hotkey"):
         computer_tools.press_key(action_parameter["keys"])
     elif action_type == "type":
         computer_tools.type(action_parameter["text"])
-    elif action_type == "drag":
-        computer_tools.left_click_drag(
-            action_parameter["coordinate"][0],
-            action_parameter["coordinate"][1],
-        )
+    elif action_type in ("drag", "left_click_drag"):
+        if "coordinate1" in action_parameter and "coordinate2" in action_parameter:
+            computer_tools.drag_between(
+                action_parameter["coordinate1"][0],
+                action_parameter["coordinate1"][1],
+                action_parameter["coordinate2"][0],
+                action_parameter["coordinate2"][1],
+            )
+        else:
+            computer_tools.left_click_drag(
+                action_parameter["coordinate"][0],
+                action_parameter["coordinate"][1],
+            )
     elif action_type == "scroll":
         if "coordinate" in action_parameter:
             computer_tools.mouse_move(
@@ -106,6 +121,13 @@ def execute_action(computer_tools, action_parameter):
                 action_parameter["coordinate"][1],
             )
         computer_tools.scroll(action_parameter.get("pixels", 1))
+    elif action_type == "hscroll":
+        if "coordinate" in action_parameter:
+            computer_tools.mouse_move(
+                action_parameter["coordinate"][0],
+                action_parameter["coordinate"][1],
+            )
+        computer_tools.hscroll(action_parameter.get("pixels", 1))
     elif action_type in ("computer_double_click", "double_click"):
         computer_tools.double_click(
             action_parameter["coordinate"][0],
@@ -168,6 +190,37 @@ def execute_action(computer_tools, action_parameter):
     return False
 
 
+def validate_action(action):
+    if not isinstance(action, dict):
+        return "tool call is not an object"
+    if action.get("name") != "computer_use":
+        return f"unsupported tool name: {action.get('name')}"
+    args = action.get("arguments")
+    if not isinstance(args, dict):
+        return "tool call arguments must be an object"
+    action_type = args.get("action")
+    if not action_type:
+        return "missing action"
+
+    coordinate_actions = {
+        "click", "left_click", "mouse_move", "middle_click", "right click",
+        "right_click", "computer_double_click", "double_click", "triple_click",
+    }
+    if action_type in coordinate_actions and "coordinate" not in args:
+        return f"{action_type} requires coordinate"
+    if action_type in ("open app", "open_app") and not args.get("app_name"):
+        return "open_app requires app_name"
+    if action_type in ("key", "hotkey") and not args.get("keys"):
+        return "key requires keys"
+    if action_type == "type" and "text" not in args:
+        return "type requires text"
+    if action_type in ("drag", "left_click_drag") and not (
+        "coordinate" in args or ("coordinate1" in args and "coordinate2" in args)
+    ):
+        return "drag requires coordinate or coordinate1/coordinate2"
+    return None
+
+
 class AgentState(TypedDict):
     instruction: str
     safe_instruction: str
@@ -182,6 +235,7 @@ class AgentState(TypedDict):
     messages: Optional[List[Dict[str, Any]]]
     output_text: Optional[str]
     action_list: List[Dict[str, Any]]
+    error_message: Optional[str]
 
     resized_width: Optional[int]
     resized_height: Optional[int]
@@ -253,15 +307,25 @@ def plan_node(state: AgentState) -> AgentState:
     return {
         **state,
         "output_text": output_text,
+        "error_message": None,
     }
 
 
 def parse_node(state: AgentState) -> AgentState:
     action_list = extract_tool_calls(state["output_text"] or "")
+    error_message = None
+    if not action_list:
+        error_message = "No valid tool_call found in model output"
+        print(f"[WARN] {error_message}")
+    if (state["output_text"] or "").strip() == "Error calling LLM":
+        error_message = "LLM call failed after retries"
+        print(f"[ERROR] {error_message}")
 
     return {
         **state,
         "action_list": action_list,
+        "error_message": error_message,
+        "stop_flag": state["stop_flag"] or error_message is not None,
     }
 
 
@@ -286,7 +350,19 @@ def resize_node(state: AgentState) -> AgentState:
 def act_node(state: AgentState) -> AgentState:
     stop_flag = state["stop_flag"]
 
+    if state["error_message"]:
+        return {
+            **state,
+            "stop_flag": stop_flag,
+        }
+
+    executed_any = False
     for action_id, action in enumerate(state["action_list"]):
+        validation_error = validate_action(action)
+        if validation_error:
+            print(f"[WARN] Skipping invalid action: {validation_error}")
+            continue
+
         action_parameter = action["arguments"]
 
         rescale_coordinates(
@@ -294,6 +370,14 @@ def act_node(state: AgentState) -> AgentState:
             state["screen_width"],
             state["screen_height"],
         )
+        clamp_coordinates(
+            action_parameter,
+            state["screen_width"],
+            state["screen_height"],
+        )
+
+        print(f"[INFO] Executing action: {action_parameter}")
+        executed_any = True
 
         should_stop = execute_action(
             state["computer_tools"],
@@ -313,6 +397,10 @@ def act_node(state: AgentState) -> AgentState:
             ),
         )
 
+    if state["action_list"] and not executed_any:
+        print("[WARN] No executable action remained after validation")
+        stop_flag = True
+
     return {
         **state,
         "stop_flag": stop_flag,
@@ -327,7 +415,7 @@ def update_history_node(state: AgentState) -> AgentState:
         "image": state["screenshot_path"],
     })
 
-    time.sleep(2)
+    time.sleep(POST_ACTION_WAIT_SECONDS)
 
     return {
         **state,
@@ -430,6 +518,7 @@ def run_agent(computer_tools, vllm, instruction, output_dir, max_steps=50):
         "screen_height": None,
 
         "capture_ok": False,
+        "error_message": None,
 
         "computer_tools": computer_tools,
         "vllm": vllm,
