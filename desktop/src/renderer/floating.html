@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="background:transparent;margin:0;padding:0;overflow:hidden;width:100%;height:100%;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>Agent</title>
+    <style>
+      html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
+      .fr{position:relative;width:100%;height:100%;background:transparent;-webkit-app-region:drag}
+      .fb{position:absolute;top:8px;left:8px;width:72px;height:72px;border-radius:50%;cursor:pointer;-webkit-app-region:no-drag;background:linear-gradient(145deg,rgba(28,36,58,.92),rgba(10,14,28,.88));box-shadow:0 14px 36px rgba(0,0,0,.32),inset 0 0 0 1px rgba(255,255,255,.1);z-index:10;transition:transform .18s}
+      .fb:hover{transform:scale(1.06)}
+      .fr-ing{position:absolute;inset:-4px;border-radius:50%;pointer-events:none;z-index:1}
+      .fr-core{position:absolute;inset:9px;border-radius:50%;display:flex;align-items:center;justify-content:center;z-index:4}
+      .fr-ico{font-size:26px;line-height:1;filter:drop-shadow(0 4px 6px rgba(0,0,0,.3))}
+      .fr-pct{position:absolute;bottom:14px;font-size:10px;font-weight:600;color:rgba(255,255,255,.72);line-height:1}
+      .fp{position:absolute;top:88px;left:8px;width:196px;padding:14px 16px;border-radius:16px;color:#e8e8ed;background:rgba(15,21,34,.96);box-shadow:0 18px 46px rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);opacity:0;visibility:hidden;transform:translateY(6px);transition:opacity .18s,visibility .18s,transform .18s;pointer-events:none;z-index:20;-webkit-app-region:no-drag}
+      .fb:hover+.fp{opacity:1;visibility:visible;transform:translateY(0)}
+      .fp-t{font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .fp-r{display:flex;align-items:flex-start;font-size:12px;line-height:1.6;padding:1px 0}
+      .fp-r .l{color:rgba(232,232,237,.5);flex-shrink:0;margin-right:6px;min-width:36px}
+      .fp-r .v{color:rgba(232,232,237,.88);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .fp-b{position:relative;margin-top:10px;height:3px;border-radius:99px;background:rgba(255,255,255,.1);overflow:hidden}
+      .fp-f{position:absolute;left:0;top:0;height:100%;border-radius:inherit;transition:width .5s;background:linear-gradient(90deg,#4f8cff,rgba(255,255,255,.3))}
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:transparent;overflow:hidden;width:100vw;height:100vh;">
+    <div id="root">
+      <div class="fr" onclick="window.__orbClick?.()">
+        <div class="fb" id="orb">
+          <div class="fr-ing" id="orb-ring"></div>
+          <div class="fr-core">
+            <span class="fr-ico" id="orb-ico">&#x26A1;</span>
+            <span class="fr-pct" id="orb-pct" style="display:none"></span>
+          </div>
+        </div>
+        <div class="fp" id="orb-pop">
+          <div class="fp-t" id="pop-title">&#x7A7A;&#x95F2;</div>
+          <div class="fp-r"><span class="l">&#x4EFB;&#x52A1;&#xFF1A;</span><span class="v" id="pop-task">&#x6682;&#x65E0;&#x4EFB;&#x52A1;</span></div>
+          <div class="fp-r"><span class="l">&#x5F53;&#x524D;&#xFF1A;</span><span class="v" id="pop-act">&#x7B49;&#x5F85;&#x4E0B;&#x4E00;&#x6B65;</span></div>
+          <div class="fp-r"><span class="l">&#x8FDB;&#x5EA6;&#xFF1A;</span><span class="v" id="pop-step">&#x6682;&#x65E0;&#x6B65;&#x9AA4;</span></div>
+          <div class="fp-b"><div class="fp-f" id="pop-bar" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./floating-entry.tsx"></script>
+  </body>
+</html>

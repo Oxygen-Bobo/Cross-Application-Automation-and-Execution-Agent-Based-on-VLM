@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / Electron
+desktop/node_modules/
+desktop/out/
+desktop/dist/
+desktop/*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
