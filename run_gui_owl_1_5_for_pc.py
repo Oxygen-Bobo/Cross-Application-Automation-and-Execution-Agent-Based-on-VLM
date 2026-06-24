@@ -20,6 +20,9 @@ from utils import (
     sanitize_filename,
     smart_resize,
     GUIOwlWrapper,
+    VLM_IMAGE_FACTOR,
+    VLM_MIN_PIXELS,
+    VLM_MAX_PIXELS,
 )
 
 from typing import Any, Dict, List, Optional, TypedDict
@@ -183,6 +186,9 @@ class AgentState(TypedDict):
     resized_width: Optional[int]
     resized_height: Optional[int]
 
+    screen_width: Optional[int]
+    screen_height: Optional[int]
+
     capture_ok: bool
 
     computer_tools: Any
@@ -207,9 +213,14 @@ def observe_node(state: AgentState) -> AgentState:
             "capture_ok": False,
         }
 
+    with Image.open(screen_shot) as img:
+        screen_width, screen_height = img.size
+
     return {
         **state,
         "screenshot_path": screen_shot,
+        "screen_width": screen_width,
+        "screen_height": screen_height,
         "capture_ok": True,
     }
 
@@ -260,9 +271,9 @@ def resize_node(state: AgentState) -> AgentState:
     resized_height, resized_width = smart_resize(
         dummy_image.height,
         dummy_image.width,
-        factor=16,
-        min_pixels=3136,
-        max_pixels=1003520 * 200,
+        factor=VLM_IMAGE_FACTOR,
+        min_pixels=VLM_MIN_PIXELS,
+        max_pixels=VLM_MAX_PIXELS,
     )
 
     return {
@@ -280,8 +291,8 @@ def act_node(state: AgentState) -> AgentState:
 
         rescale_coordinates(
             action_parameter,
-            state["resized_width"],
-            state["resized_height"],
+            state["screen_width"],
+            state["screen_height"],
         )
 
         should_stop = execute_action(
@@ -414,6 +425,9 @@ def run_agent(computer_tools, vllm, instruction, output_dir, max_steps=50):
 
         "resized_width": None,
         "resized_height": None,
+
+        "screen_width": None,
+        "screen_height": None,
 
         "capture_ok": False,
 

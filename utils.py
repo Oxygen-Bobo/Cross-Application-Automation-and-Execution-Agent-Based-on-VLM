@@ -391,6 +391,12 @@ def format_step_text(thought, action_list, explanation, max_width=88):
 # Smart image resize (Qwen-VL style)
 # ---------------------------------------------------------------------------
 
+# Unified VLM image parameters — both image_to_base64() and resize_node()
+# must use the same constants so coordinate rescaling stays consistent.
+VLM_IMAGE_FACTOR = 16
+VLM_MIN_PIXELS = 3136
+VLM_MAX_PIXELS = 1920 * 1080  # ≈ 2.07 Mpx
+
 def smart_resize(
     height, width,
     factor=28,
@@ -722,13 +728,11 @@ def image_to_base64(image_path):
     if image_path.startswith("file://"):
         image_path = image_path[7:]
     dummy_image = Image.open(image_path)
-    MIN_PIXELS=3136
-    MAX_PIXELS=10035200
-    resized_height, resized_width  = smart_resize(dummy_image.height,
+    resized_height, resized_width = smart_resize(dummy_image.height,
         dummy_image.width,
-        factor=16,
-        min_pixels=MIN_PIXELS,
-        max_pixels=MAX_PIXELS,)
+        factor=VLM_IMAGE_FACTOR,
+        min_pixels=VLM_MIN_PIXELS,
+        max_pixels=VLM_MAX_PIXELS)
     dummy_image = dummy_image.resize((resized_width, resized_height))
     return f"data:image/png;base64,{pil_to_base64(dummy_image)}"
 

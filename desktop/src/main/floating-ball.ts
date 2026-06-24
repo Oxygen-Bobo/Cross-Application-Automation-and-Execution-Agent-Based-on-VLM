@@ -9,7 +9,7 @@ export function createFloatingBall(mainWindow: BrowserWindow) {
   if (floatingWin && !floatingWin.isDestroyed()) return;
 
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  const W = 96, H = 96;
+  const W = 230, H = 250;
 
   floatingWin = new BrowserWindow({
     x: sw - W - 20,

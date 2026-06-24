@@ -129,6 +129,22 @@ export default function ChatView() {
           return { ...p, status: s as any, endedAt: now, steps, currentActionText: s === "completed" ? "任务已完成" : "任务执行失败" };
         });
         persistRunNow();
+        // Update floating orb with terminal status
+        const r = activeRun();
+        if (r) {
+          window.electronAPI.floating.update({
+            status: s,
+            currentStep: r.currentStep,
+            maxSteps: r.maxSteps,
+            actionText: s === "completed" ? "任务已完成" : "任务执行失败",
+            instruction: r.instruction,
+            currentPhase: s,
+            progressPercent: s === "completed" ? 100 : r.steps.filter(st => st.status === "completed" || st.status === "failed").length > 0 ? 50 : 0,
+          });
+        }
+        if (s === "failed") {
+          setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
+        }
         setTimeout(() => window.electronAPI.floating.hide(), 3000);
       }),
       window.electronAPI.agent.onError(d => {
@@ -145,6 +161,20 @@ export default function ChatView() {
           return { ...p, status: "failed", endedAt: now, steps, currentActionText: "任务执行失败" };
         });
         persistRunNow();
+        // Update floating orb — red failed state, then show main window
+        const r = activeRun();
+        if (r) {
+          window.electronAPI.floating.update({
+            status: "failed",
+            currentStep: r.currentStep,
+            maxSteps: r.maxSteps,
+            actionText: "任务执行失败",
+            instruction: r.instruction,
+            currentPhase: "error",
+          });
+        }
+        setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
+        setTimeout(() => window.electronAPI.floating.hide(), 3000);
       }),
       (window as any).desktopAgent?.onHistoryUpdated?.(() => refreshHistory()) || (() => {}),
     );
@@ -213,11 +243,65 @@ export default function ChatView() {
           return { ...p, status: s as any, endedAt: now, steps, currentActionText: s === "completed" ? "任务已完成" : "任务执行失败" };
         });
         persistRunNow();
+        // Update floating orb
+        const r2 = activeRun();
+        if (r2) {
+          window.electronAPI.floating.update({
+            status: evt.status === "success" ? "completed" : "failed",
+            currentStep: r2.currentStep,
+            maxSteps: r2.maxSteps,
+            actionText: evt.status === "success" ? "任务已完成" : "任务执行失败",
+            instruction: r2.instruction,
+            currentPhase: evt.status === "success" ? "completed" : "failed",
+            progressPercent: evt.status === "success" ? 100 : 50,
+          });
+        }
+        if (evt.status !== "success") {
+          setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
+        }
+        setTimeout(() => window.electronAPI.floating.hide(), 3000);
         break;
     }
   }
 
-  async function uf() { const r = activeRun(); if (!r || !["running","capturing","thinking","acting","waiting"].includes(r.status)) return; await window.electronAPI.floating.update({ status: r.status, currentStep: r.currentStep, maxSteps: r.maxSteps, actionText: r.currentActionText, elapsedMs: elapsed(), instruction: r.instruction }); }
+  async function uf() {
+    const r = activeRun();
+    if (!r || !["running","capturing","thinking","acting","waiting"].includes(r.status)) return;
+
+    // Current phase from step phases (check pending phases, not "running")
+    let currentPhase = "";
+    const last = r.steps[r.steps.length - 1];
+    if (last) {
+      if (last.phases.capture.status === "pending") currentPhase = "capturing";
+      else if (last.phases.ai.status === "pending") currentPhase = "thinking";
+      else if (last.phases.action.status === "pending") currentPhase = "acting";
+      else currentPhase = r.status;
+    }
+
+    // Progress: completed steps + fractional phase progress within current step
+    const done = r.steps.filter(s => s.status === "completed" || s.status === "failed").length;
+    const total = Math.max(done + 1, r.steps.length);
+    let frac = 0;
+    if (last) {
+      const cnt = [last.phases.capture, last.phases.ai, last.phases.action]
+        .filter(p => p.status === "success" || p.status === "error").length;
+      const run = [last.phases.capture, last.phases.ai, last.phases.action]
+        .some(p => p.status === "running");
+      frac = run ? (cnt + 0.5) / 3 : cnt / 3;
+    }
+    const progressPercent = Math.min(100, Math.round(((done + frac) / total) * 100));
+
+    await window.electronAPI.floating.update({
+      status: r.status,
+      currentStep: r.currentStep,
+      maxSteps: r.maxSteps,
+      actionText: r.currentActionText,
+      elapsedMs: elapsed(),
+      instruction: r.instruction,
+      currentPhase: currentPhase || r.status,
+      progressPercent,
+    });
+  }
 
   async function start(instr: string) {
     const ak = await window.electronAPI.config.getApiKey(); if (!ak) { alert("请先在设置中配置 API Key"); return; }
