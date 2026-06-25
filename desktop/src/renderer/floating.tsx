@@ -53,7 +53,7 @@ export default function init() {
   const style = document.createElement("style");
   style.textContent = `
     html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
-    .orb-root{position:relative;width:100%;height:100%;background:transparent;-webkit-app-region:drag;user-select:none}
+    .orb-root{position:relative;width:100%;height:100%;background:transparent;-webkit-app-region:no-drag;user-select:none}
     .orb{position:absolute;top:12px;left:12px;width:78px;height:78px;border:0;border-radius:50%;cursor:pointer;-webkit-app-region:no-drag;background:linear-gradient(145deg,#fffdf7,#efe5d8);box-shadow:0 18px 46px rgba(67,51,34,.24),0 0 0 1px rgba(73,62,50,.13),inset 0 1px 0 rgba(255,255,255,.92);transition:transform .18s ease,box-shadow .18s ease}
     .orb:hover{transform:translateY(-1px) scale(1.045);box-shadow:0 24px 58px rgba(67,51,34,.28),0 0 0 1px rgba(73,62,50,.18),inset 0 1px 0 rgba(255,255,255,.92)}
     .orb-ring{position:absolute;inset:-5px;border-radius:50%;pointer-events:none;filter:drop-shadow(0 0 8px rgba(47,107,92,.18))}
@@ -147,14 +147,87 @@ export default function init() {
   apply(current);
   (window as any).agentStatus = { update };
 
+  const cleanups: (() => void)[] = [];
+  const api = (window as any).electronAPI;
+  let isInteractive = false;
+  let isDragging = false;
+  let didDrag = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+
+  function setInteractive(interactive: boolean) {
+    if (isInteractive === interactive) return;
+    isInteractive = interactive;
+    api?.floating?.setInteractive?.(interactive).catch?.(() => {});
+  }
+
+  function isInsideOrb(event: MouseEvent | PointerEvent) {
+    const rect = orb.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const radius = rect.width / 2;
+    const dx = event.clientX - cx;
+    const dy = event.clientY - cy;
+    return dx * dx + dy * dy <= radius * radius;
+  }
+
+  function orbDragMetrics() {
+    const rect = orb.getBoundingClientRect();
+    return {
+      orbLeft: Math.round(rect.left),
+      orbTop: Math.round(rect.top),
+      orbWidth: Math.round(rect.width),
+      orbHeight: Math.round(rect.height),
+    };
+  }
+
+  document.addEventListener("mousemove", (event) => {
+    if (!isDragging) setInteractive(isInsideOrb(event));
+  });
+
+  document.addEventListener("mouseleave", () => {
+    if (!isDragging) setInteractive(false);
+  });
+
+  orb.addEventListener("pointerdown", async (event) => {
+    if (event.button !== 0) return;
+    isDragging = true;
+    didDrag = false;
+    dragStartX = event.screenX;
+    dragStartY = event.screenY;
+    setInteractive(true);
+    orb.setPointerCapture?.(event.pointerId);
+    await api?.floating?.dragStart?.({ screenX: event.screenX, screenY: event.screenY, ...orbDragMetrics() });
+  });
+
+  orb.addEventListener("pointermove", async (event) => {
+    if (!isDragging) return;
+    const moved = Math.hypot(event.screenX - dragStartX, event.screenY - dragStartY);
+    if (moved > 3) didDrag = true;
+    await api?.floating?.dragMove?.({ screenX: event.screenX, screenY: event.screenY, ...orbDragMetrics() });
+  });
+
+  async function finishDrag(event: PointerEvent) {
+    if (!isDragging) return;
+    isDragging = false;
+    orb.releasePointerCapture?.(event.pointerId);
+    await api?.floating?.dragEnd?.();
+    setInteractive(isInsideOrb(event));
+  }
+
+  orb.addEventListener("pointerup", finishDrag);
+  orb.addEventListener("pointercancel", finishDrag);
+
   orb.addEventListener("click", async () => {
+    if (didDrag) {
+      didDrag = false;
+      return;
+    }
     try {
-      await (window as any).electronAPI?.floating?.showMainWindow?.();
+      await api?.floating?.showMainWindow?.();
     } catch {}
   });
 
-  const cleanups: (() => void)[] = [];
-  const api = (window as any).electronAPI;
   if (api?.floating?.onStatusChanged) cleanups.push(api.floating.onStatusChanged((data: any) => update(data)));
   if (api?.floating?.onStopTask) cleanups.push(api.floating.onStopTask(async () => {
     try {

@@ -2,7 +2,16 @@ import { app, BrowserWindow, shell, ipcMain, protocol, net, Menu } from "electro
 import { join } from "path";
 import { registerConfigHandlers } from "./config-store";
 import { registerPythonHandlers } from "./python-runner";
-import { createFloatingBall, showFloating, hideFloating, sendToFloating } from "./floating-ball";
+import {
+  createFloatingBall,
+  showFloating,
+  hideFloating,
+  sendToFloating,
+  setFloatingInteractive,
+  startFloatingDrag,
+  moveFloating,
+  endFloatingDrag,
+} from "./floating-ball";
 import { HistoryStore } from "./historyStore";
 
 const historyStore = new HistoryStore();
@@ -68,6 +77,18 @@ app.whenReady().then(() => {
   const TERMINAL = ["completed","failed","stopped"];
   ipcMain.handle("floating:show", () => { showFloating(); });
   ipcMain.handle("floating:hide", () => { hideFloating(); });
+  ipcMain.handle("floating:setInteractive", (_e, interactive: boolean) => {
+    setFloatingInteractive(Boolean(interactive));
+  });
+  ipcMain.handle("floating:dragStart", (_e, point: { screenX: number; screenY: number }) => {
+    startFloatingDrag(point);
+  });
+  ipcMain.handle("floating:dragMove", (_e, point: { screenX: number; screenY: number }) => {
+    moveFloating(point);
+  });
+  ipcMain.handle("floating:dragEnd", () => {
+    endFloatingDrag();
+  });
   ipcMain.handle("floating:update", (_e, data) => {
     // Enrich with derived fields if renderer didn't provide them
     const enriched = { ...data };

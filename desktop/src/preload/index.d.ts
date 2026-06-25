@@ -71,6 +71,24 @@ export interface ElectronAPI {
     hide: () => Promise<void>;
     update: (d: FloatingUpdate) => Promise<void>;
     showMainWindow: () => Promise<void>;
+    setInteractive: (interactive: boolean) => Promise<void>;
+    dragStart: (point: {
+      screenX: number;
+      screenY: number;
+      orbLeft?: number;
+      orbTop?: number;
+      orbWidth?: number;
+      orbHeight?: number;
+    }) => Promise<void>;
+    dragMove: (point: {
+      screenX: number;
+      screenY: number;
+      orbLeft?: number;
+      orbTop?: number;
+      orbWidth?: number;
+      orbHeight?: number;
+    }) => Promise<void>;
+    dragEnd: () => Promise<void>;
     onStatusChanged: (cb: (d: any) => void) => () => void;
     onStopTask: (cb: () => void) => () => void;
   };

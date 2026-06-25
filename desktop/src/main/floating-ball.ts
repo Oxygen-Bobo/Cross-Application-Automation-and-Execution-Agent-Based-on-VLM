@@ -3,6 +3,23 @@ import { join } from "path";
 
 let floatingWin: BrowserWindow | null = null;
 let mainRef: BrowserWindow | null = null;
+type DragPoint = {
+  screenX: number;
+  screenY: number;
+  orbLeft?: number;
+  orbTop?: number;
+  orbWidth?: number;
+  orbHeight?: number;
+};
+
+let dragState: {
+  pointerOffsetX: number;
+  pointerOffsetY: number;
+  orbLeft: number;
+  orbTop: number;
+  orbWidth: number;
+  orbHeight: number;
+} | null = null;
 
 function isAlive(win: BrowserWindow | null): win is BrowserWindow {
   return !!win && !win.isDestroyed();
@@ -13,6 +30,59 @@ function showMainWindow() {
   mainRef.restore();
   mainRef.show();
   mainRef.focus();
+}
+
+export function setFloatingInteractive(interactive: boolean) {
+  if (!isAlive(floatingWin)) return;
+  floatingWin.setIgnoreMouseEvents(!interactive, { forward: true });
+}
+
+export function startFloatingDrag(point: DragPoint) {
+  if (!isAlive(floatingWin)) return;
+  const bounds = floatingWin.getBounds();
+  const orbLeft = Math.round(point.orbLeft ?? 12);
+  const orbTop = Math.round(point.orbTop ?? 12);
+  const orbWidth = Math.round(point.orbWidth ?? 78);
+  const orbHeight = Math.round(point.orbHeight ?? 78);
+  dragState = {
+    pointerOffsetX: Math.round(point.screenX - bounds.x - orbLeft),
+    pointerOffsetY: Math.round(point.screenY - bounds.y - orbTop),
+    orbLeft,
+    orbTop,
+    orbWidth,
+    orbHeight,
+  };
+  setFloatingInteractive(true);
+}
+
+export function moveFloating(point: DragPoint) {
+  if (!isAlive(floatingWin) || !dragState) return;
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(point.screenX),
+    y: Math.round(point.screenY),
+  });
+  const area = display.workArea;
+  const orbX = Math.max(
+    area.x,
+    Math.min(
+      Math.round(point.screenX - dragState.pointerOffsetX),
+      area.x + area.width - dragState.orbWidth,
+    ),
+  );
+  const orbY = Math.max(
+    area.y,
+    Math.min(
+      Math.round(point.screenY - dragState.pointerOffsetY),
+      area.y + area.height - dragState.orbHeight,
+    ),
+  );
+  const nextX = orbX - dragState.orbLeft;
+  const nextY = orbY - dragState.orbTop;
+  floatingWin.setPosition(nextX, nextY, false);
+}
+
+export function endFloatingDrag() {
+  dragState = null;
 }
 
 export function createFloatingBall(mainWindow: BrowserWindow) {
@@ -54,6 +124,7 @@ export function createFloatingBall(mainWindow: BrowserWindow) {
   });
 
   floatingWin.setAlwaysOnTop(true, "screen-saver");
+  setFloatingInteractive(false);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     floatingWin.loadURL(`${process.env.ELECTRON_RENDERER_URL}#/floating`);
