@@ -1,7 +1,5 @@
 # 🧠 Cross-Application Automation and Execution Agent Based on VLM 设计文档
 
-> ✨ 本版本在原设计文档基础上加入了轻量图标，用于提升阅读层次感与趣味性。
-
 ## 📘 1. 文档概述
 
 本文档用于说明 **Cross-Application Automation and Execution Agent Based on VLM** 项目的整体设计、核心架构、模块职责、运行流程、关键技术方案、安全边界以及后续可扩展方向。
@@ -60,7 +58,7 @@ agent_bridge.py / run_gui_owl_1_5_for_pc.py
  ▼
 Observe → Build Messages → Plan → Parse → Resize → Act → Update History
  │                                                        │
- │ 桌面截图                                               │ PyAutoGUI
+ │ 桌面截图                                                │ PyAutoGUI
  ▼                                                        ▼
 视觉语言模型 / OpenAI-compatible API                桌面应用、网页、系统 UI
 ```
