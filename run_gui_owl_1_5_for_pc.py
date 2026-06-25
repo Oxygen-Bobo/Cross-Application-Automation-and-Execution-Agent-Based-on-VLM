@@ -27,6 +27,7 @@ from utils import (
 
 from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import StateGraph, START, END
+from agent_skills import selected_skill_ids
 
 API_KEY = "sk-ws-H.RPEIMEH.dBrN.MEQCIFzV2Scc_QsDTvs1a2WVrw2t1TeMMNfqH5qi6Gqof5arAiAzllm-aN8hRipTNj6E8MLreHHil0ThualYvWngnH4qog"
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -59,6 +60,8 @@ def _normalize_coordinate_keys(action_parameter):
     for key in list(action_parameter.keys()):
         if key in ("coordinate", "coordinate1", "coordinate2"):
             continue
+        if key in ("x", "y"):
+            continue
         if key.startswith("coordinate"):
             if key.startswith("coordinate2"):
                 clean = "coordinate2"
@@ -68,10 +71,50 @@ def _normalize_coordinate_keys(action_parameter):
                 clean = "coordinate"
             if clean not in action_parameter:
                 action_parameter[clean] = action_parameter.pop(key)
+    if "coordinate" not in action_parameter and "x" in action_parameter and "y" in action_parameter:
+        action_parameter["coordinate"] = [action_parameter.pop("x"), action_parameter.pop("y")]
+
+
+def _normalize_action_type(action_parameter):
+    action_type = action_parameter.get("action")
+    if not isinstance(action_type, str):
+        return
+    normalized = action_type.strip().lower().replace("-", "_")
+    aliases = {
+        "left click": "left_click",
+        "left_click": "left_click",
+        "click": "left_click",
+        "right click": "right_click",
+        "right_click": "right_click",
+        "middle click": "middle_click",
+        "middle_click": "middle_click",
+        "double click": "double_click",
+        "double_click": "double_click",
+        "triple click": "triple_click",
+        "triple_click": "triple_click",
+        "drag": "left_click_drag",
+        "left drag": "left_click_drag",
+        "left_click_drag": "left_click_drag",
+        "hot key": "hotkey",
+        "hotkey": "hotkey",
+        "press_key": "key",
+        "keyboard": "key",
+        "input": "type",
+        "text": "type",
+        "open app": "open_app",
+        "open_app": "open_app",
+    }
+    action_parameter["action"] = aliases.get(normalized, action_type.strip())
+
+
+def normalize_action_parameter(action_parameter):
+    _normalize_action_type(action_parameter)
+    _normalize_coordinate_keys(action_parameter)
+    return action_parameter
 
 
 def execute_action(computer_tools, action_parameter):
-    _normalize_coordinate_keys(action_parameter)
+    normalize_action_parameter(action_parameter)
 
     action_type = action_parameter["action"]
 
@@ -198,6 +241,7 @@ def validate_action(action):
     args = action.get("arguments")
     if not isinstance(args, dict):
         return "tool call arguments must be an object"
+    normalize_action_parameter(args)
     action_type = args.get("action")
     if not action_type:
         return "missing action"
@@ -495,6 +539,7 @@ def run_agent(computer_tools, vllm, instruction, output_dir, max_steps=50):
     safe_instruction = sanitize_filename(instruction)
 
     app = build_gui_owl_graph()
+    print(f"[INFO] Active skills: {', '.join(selected_skill_ids(instruction))}")
 
     initial_state: AgentState = {
         "instruction": instruction,

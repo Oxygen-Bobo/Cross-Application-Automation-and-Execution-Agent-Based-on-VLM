@@ -17,6 +17,8 @@ import pyautogui
 import pyperclip
 from PIL import Image, ImageDraw
 
+from agent_skills import render_operation_guidance
+
 
 # ---------------------------------------------------------------------------
 # Computer interaction tools
@@ -642,6 +644,8 @@ WECHAT_OPERATION_GUIDANCE = (
 
 
 def get_operation_guidance(instruction):
+    return render_operation_guidance(instruction)
+
     text = instruction.lower()
     guidance = [COMMON_OPERATION_GUIDANCE]
     if (
@@ -747,6 +751,8 @@ def extract_tool_calls(text):
     """
     pattern = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL | re.IGNORECASE)
     blocks = pattern.findall(text)
+    if not blocks:
+        blocks = _fallback_tool_call_blocks(text)
 
     actions = []
     for blk in blocks:
@@ -761,6 +767,16 @@ def extract_tool_calls(text):
             parsed = repaired
         actions.append(_normalize_tool_call(parsed))
     return actions
+
+
+def _fallback_tool_call_blocks(text):
+    if "computer_use" not in text:
+        return []
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    return [text[start:end + 1]]
 
 
 def _parse_tool_call_block(block):
