@@ -606,8 +606,52 @@ SYSTEM_PROMPT = (
     '- Output exactly in the order: Action, <tool_call>.\n'
     '- Be brief: one for Action.\n'
     '- Do not output anything else outside those two parts.\n'
+    '- Coordinates must be arrays like "coordinate": [267, 755]. '
+    'Never output keys like "coordinate[0]" or "coordinate[1]".\n'
     '- If finishing, use action=terminate in the tool call.'
 )
+
+
+COMMON_OPERATION_GUIDANCE = (
+    "General desktop operation guidance:\n"
+    "- Prefer reliable keyboard/search workflows over blind coordinate clicks.\n"
+    "- Do not terminate immediately after opening an application unless the "
+    "user's full task is complete and verified on screen.\n"
+    "- For long tasks, complete one concrete UI action per step, then observe "
+    "the result before deciding the next action.\n"
+    "- If the target is not visible, use app search, in-app search, hotkeys, "
+    "or scrolling before asking the user to interact.\n"
+)
+
+
+WECHAT_OPERATION_GUIDANCE = (
+    "WeChat operation guidance:\n"
+    "- After opening WeChat, continue until the target chat is open and the "
+    "message or file is visibly sent.\n"
+    "- To send to File Transfer Assistant, search for '文件传输助手' or "
+    "'File Transfer Assistant' in WeChat, open that chat, then send the "
+    "requested text or file.\n"
+    "- Use WeChat search/contact list before clicking arbitrary chat rows. "
+    "If a search box is visible, click it, type the contact name, and open "
+    "the matching result.\n"
+    "- If the requested report/file path is present in the instruction or "
+    "previous actions, use the attachment/file workflow or paste the path "
+    "into the file picker when it appears.\n"
+    "- Do not finish after only launching WeChat.\n"
+)
+
+
+def get_operation_guidance(instruction):
+    text = instruction.lower()
+    guidance = [COMMON_OPERATION_GUIDANCE]
+    if (
+        "wechat" in text
+        or "weixin" in text
+        or "微信" in instruction
+        or "文件传输助手" in instruction
+    ):
+        guidance.append(WECHAT_OPERATION_GUIDANCE)
+    return "\n".join(guidance)
 
 
 def build_messages(image_path, instruction, history_output, model_name, history_n=2):
@@ -642,6 +686,7 @@ def build_messages(image_path, instruction, history_output, model_name, history_
         "Please generate the next move according to the UI screenshot, "
         "instruction and previous actions.\n\n"
         f"Instruction: {instruction}\n\n"
+        f"{get_operation_guidance(instruction)}\n\n"
         f"Previous actions:\n{previous_actions_str}"
     )
 
@@ -706,11 +751,96 @@ def extract_tool_calls(text):
     actions = []
     for blk in blocks:
         blk = blk.strip()
-        try:
-            actions.append(ast.literal_eval(blk))
-        except (ValueError, SyntaxError) as e:
-            print(f"[WARN] Failed to parse tool_call block: {e} | snippet: {blk[:80]}...")
+        parsed = _parse_tool_call_block(blk)
+        if parsed is None:
+            repaired = _repair_tool_call_block(blk)
+            if repaired is None:
+                print(f"[WARN] Failed to parse tool_call block | snippet: {blk[:80]}...")
+                continue
+            print("[WARN] Repaired malformed tool_call block")
+            parsed = repaired
+        actions.append(_normalize_tool_call(parsed))
     return actions
+
+
+def _parse_tool_call_block(block):
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            return parser(block)
+        except Exception:
+            continue
+    return None
+
+
+def _repair_tool_call_block(block):
+    name_match = re.search(r'"name"\s*:\s*"([^"]+)"', block)
+    action_match = re.search(r'"action"\s*:\s*"([^"]+)"', block)
+    if not name_match or not action_match:
+        return None
+
+    args = {"action": action_match.group(1)}
+    for field in ("app_name", "text", "status"):
+        match = re.search(rf'"{field}"\s*:\s*"([^"]*)"', block, re.DOTALL)
+        if match:
+            args[field] = match.group(1)
+
+    for field in ("pixels", "time"):
+        match = re.search(rf'"{field}"\s*:\s*(-?\d+(?:\.\d+)?)', block)
+        if match:
+            value = float(match.group(1))
+            args[field] = int(value) if value.is_integer() else value
+
+    _repair_indexed_coordinates(block, args, "coordinate")
+    _repair_indexed_coordinates(block, args, "coordinate1")
+    _repair_indexed_coordinates(block, args, "coordinate2")
+
+    if "keys" not in args:
+        keys_match = re.search(r'"keys"\s*:\s*(\[[^\]]*\]|"[^"]+")', block, re.DOTALL)
+        if keys_match:
+            parsed_keys = _parse_tool_call_block(keys_match.group(1))
+            if parsed_keys is not None:
+                args["keys"] = parsed_keys if isinstance(parsed_keys, list) else [parsed_keys]
+
+    return {"name": name_match.group(1), "arguments": args}
+
+
+def _repair_indexed_coordinates(block, args, field):
+    if field in args:
+        return
+    x_match = re.search(rf'"{field}\[0\]"\s*:\s*(-?\d+(?:\.\d+)?)', block)
+    y_match = re.search(rf'"{field}\[1\]"\s*:\s*(-?\d+(?:\.\d+)?)', block)
+    if x_match and y_match:
+        args[field] = [float(x_match.group(1)), float(y_match.group(1))]
+
+
+def _normalize_tool_call(call):
+    if not isinstance(call, dict):
+        return call
+    args = call.get("arguments")
+    if not isinstance(args, dict):
+        return call
+
+    for field in ("coordinate", "coordinate1", "coordinate2"):
+        if field in args:
+            continue
+        x_key = f"{field}[0]"
+        y_key = f"{field}[1]"
+        if x_key in args and y_key in args:
+            args[field] = [args.pop(x_key), args.pop(y_key)]
+
+    action = args.get("action")
+    if isinstance(action, str):
+        normalized_action = action.strip().lower().replace("-", "_")
+        action_aliases = {
+            "left click": "left_click",
+            "right click": "right_click",
+            "double click": "double_click",
+            "triple click": "triple_click",
+            "drag": "left_click_drag",
+            "open app": "open_app",
+        }
+        args["action"] = action_aliases.get(normalized_action, action.strip())
+    return call
 
 
 # ---------------------------------------------------------------------------
