@@ -1,22 +1,82 @@
-import { createSignal, createEffect, onCleanup, Show } from "solid-js";
-import type { AgentEvent } from "../types/agent";
-import type { AgentRun } from "../types/agent";
-import type { HistoryRun } from "../types/agent";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import type { AgentEvent, AgentRun, HistoryRun, RunStatus } from "../types/agent";
 import { inferCompactPlanFromInstruction } from "../lib/compactPlan";
-import { parseAgentStdoutLine, applyAgentEventToRun } from "../lib/agentNormalize";
-import { TaskPlanBubble } from "../components/TaskPlanBubble";
+import { applyAgentEventToRun, parseAgentStdoutLine } from "../lib/agentNormalize";
 import { AgentTimeline } from "../components/AgentTimeline";
+import { TaskPlanBubble } from "../components/TaskPlanBubble";
 import "../styles/agent-dashboard.css";
 
 type ViewMode = "new" | "history" | "running";
+type PromptCard = { id: string; title: string; description: string; prompt: string; accent: string };
 
+const RUNNING_STATUSES: RunStatus[] = ["running", "capturing", "thinking", "acting", "waiting"];
+const PROMPT_KEY = "desktop-agent.frequent-prompts.v2";
 let defaultOutputDir = "";
-const RECS = [
-  { t: "打开微信发消息", d: "找到联系人、输入内容并发送", p: "打开微信，找到指定联系人，发送消息" },
-  { t: "整理桌面文件", d: "识别文件类型，按文档、图片分类整理", p: "帮我整理桌面上的文件，按类型放进不同文件夹" },
-  { t: "查找最近下载文件", d: "打开下载目录查找最近保存的文件", p: "帮我查找最近下载的文件" },
-  { t: "打开浏览器搜索", d: "自动打开浏览器搜索指定内容", p: "打开浏览器，搜索指定信息" },
+
+const DEFAULT_PROMPTS: PromptCard[] = [
+  {
+    id: "wechat-report",
+    title: "报告发送给微信文件传输助手",
+    description: "适合把已生成的报告、表格或文档发送到微信。",
+    prompt: "打开微信，搜索并进入文件传输助手，将刚刚生成的报告文件发送过去，发送后确认会话中出现该文件。",
+    accent: "mint",
+  },
+  {
+    id: "desktop-cleanup",
+    title: "整理桌面文件",
+    description: "按文档、图片、压缩包、安装包分类整理。",
+    prompt: "请整理桌面上的文件，按文档、图片、压缩包、安装包分类创建文件夹并移动进去，完成后检查整理结果。",
+    accent: "clay",
+  },
+  {
+    id: "browser-summary",
+    title: "浏览器检索并总结",
+    description: "搜索资料，提取重点，再给出简明总结。",
+    prompt: "打开浏览器搜索指定主题，阅读可靠结果，提取关键结论并用简洁中文总结给我。",
+    accent: "blue",
+  },
+  {
+    id: "downloads-latest",
+    title: "查找最近下载文件",
+    description: "打开下载目录并定位最新文件。",
+    prompt: "打开下载文件夹，按时间排序，找到最近下载的文件并告诉我文件名和位置。",
+    accent: "gold",
+  },
 ];
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    idle: "空闲",
+    running: "运行中",
+    capturing: "观察屏幕",
+    thinking: "理解界面",
+    acting: "执行操作",
+    waiting: "等待响应",
+    completed: "已完成",
+    failed: "失败",
+    stopped: "已停止",
+  };
+  return labels[status] || status;
+}
+
+function running(run: AgentRun | null) {
+  return !!run && RUNNING_STATUSES.includes(run.status);
+}
+
+function loadPrompts(): PromptCard[] {
+  try {
+    const raw = localStorage.getItem(PROMPT_KEY);
+    if (!raw) return DEFAULT_PROMPTS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_PROMPTS;
+  } catch {
+    return DEFAULT_PROMPTS;
+  }
+}
+
+function savePrompts(prompts: PromptCard[]) {
+  localStorage.setItem(PROMPT_KEY, JSON.stringify(prompts));
+}
 
 export default function ChatView() {
   const [activeRun, setActiveRun] = createSignal<AgentRun | null>(null);
@@ -24,359 +84,652 @@ export default function ChatView() {
   const [viewMode, setViewMode] = createSignal<ViewMode>("new");
   const [historyItems, setHistoryItems] = createSignal<HistoryRun[]>([]);
   const [elapsed, setElapsed] = createSignal(0);
+  const [prompts, setPrompts] = createSignal<PromptCard[]>(loadPrompts());
   let scrollRef: HTMLDivElement | undefined;
   let timer: number | null = null;
   let persistTimer: number | null = null;
   let listeners: (() => void)[] = [];
 
-  // --- History helpers ---
   async function refreshHistory() {
-    try { const h = await window.electronAPI.agent.getHistory() || []; setHistoryItems(h); (window as any).__setHistory?.(h); } catch {}
+    try {
+      const history = (await window.electronAPI.agent.getHistory()) || [];
+      setHistoryItems(history);
+      (window as any).__setHistory?.(history);
+    } catch {}
   }
+
   async function selectHistory(id: string) {
     try {
-      const d = await window.electronAPI.agent.loadFullRun(id);
-      if (d) { setSelectedRun(d); setViewMode("history"); return; }
+      const detail = await window.electronAPI.agent.loadFullRun(id);
+      if (detail) {
+        setSelectedRun(detail);
+        setViewMode("history");
+        return;
+      }
     } catch {}
-    // Fallback: create minimal run from history list item
-    const item = historyItems().find(h => h.id === id);
-    if (item) {
-      const minimal: AgentRun = {
-        id: item.id, instruction: item.instruction, status: item.status as any,
-        createdAt: new Date(item.createdAt).getTime(), elapsedMs: item.elapsedMs || 0,
-        currentStep: item.stepCount || 0, maxSteps: item.maxSteps || 50,
-        currentActionText: item.completed ? "任务已完成" : item.status,
-        compactPlan: inferCompactPlanFromInstruction(item.instruction),
-        steps: [], rawLogs: [], outputDir: "", modelName: "",
-      };
-      setSelectedRun(minimal); setViewMode("history");
-    }
+    const item = historyItems().find((h) => h.id === id);
+    if (!item) return;
+    setSelectedRun({
+      id: item.id,
+      instruction: item.instruction,
+      status: item.status as RunStatus,
+      createdAt: new Date(item.createdAt).getTime(),
+      elapsedMs: item.elapsedMs || 0,
+      currentStep: item.stepCount || 0,
+      maxSteps: item.maxSteps || 50,
+      currentActionText: item.completed ? "任务已完成" : statusLabel(item.status),
+      compactPlan: inferCompactPlanFromInstruction(item.instruction),
+      steps: [],
+      rawLogs: [],
+      outputDir: "",
+      modelName: "",
+    });
+    setViewMode("history");
   }
-  function resetToNew() { setViewMode("new"); setSelectedRun(null); setActiveRun(null); setElapsed(0); }
-  function persistRun(r: AgentRun) {
+
+  function resetToNew() {
+    setViewMode("new");
+    setSelectedRun(null);
+    setActiveRun(null);
+    setElapsed(0);
+  }
+
+  function persistRun(run: AgentRun) {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = window.setTimeout(async () => {
       persistTimer = null;
-      const hr = { id: r.id, instruction: r.instruction, status: r.status, createdAt: new Date(r.createdAt).toISOString(), stepCount: r.steps.length, maxSteps: r.maxSteps, currentStep: r.steps.length, elapsedMs: elapsed(), completed: r.status === "completed" };
-      await window.electronAPI.agent.saveHistory(hr as any);
-      await window.electronAPI.agent.saveFullRun(r);
+      const summary = {
+        id: run.id,
+        instruction: run.instruction,
+        status: run.status,
+        createdAt: new Date(run.createdAt).toISOString(),
+        stepCount: run.steps.length,
+        maxSteps: run.maxSteps,
+        currentStep: run.steps.length,
+        elapsedMs: elapsed(),
+        completed: run.status === "completed",
+      };
+      await window.electronAPI.agent.saveHistory(summary as any);
+      await window.electronAPI.agent.saveFullRun(run);
       refreshHistory();
-    }, 1000);
+    }, 800);
   }
+
   async function persistRunNow() {
-    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
-    const r = activeRun(); if (!r) { refreshHistory(); return; }
-    const hr = { id: r.id, instruction: r.instruction, status: r.status, createdAt: new Date(r.createdAt).toISOString(), stepCount: r.steps.length, maxSteps: r.maxSteps, currentStep: r.steps.length, elapsedMs: elapsed(), completed: r.status === "completed" };
-    await window.electronAPI.agent.saveHistory(hr as any);
-    await window.electronAPI.agent.saveFullRun(r);
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    const run = activeRun();
+    if (!run) {
+      refreshHistory();
+      return;
+    }
+    const summary = {
+      id: run.id,
+      instruction: run.instruction,
+      status: run.status,
+      createdAt: new Date(run.createdAt).toISOString(),
+      stepCount: run.steps.length,
+      maxSteps: run.maxSteps,
+      currentStep: run.steps.length,
+      elapsedMs: elapsed(),
+      completed: run.status === "completed",
+    };
+    await window.electronAPI.agent.saveHistory(summary as any);
+    await window.electronAPI.agent.saveFullRun(run);
     refreshHistory();
   }
 
-  // Expose for App/Sidebar
   (window as any).__loadPastRun = (id: string) => selectHistory(id);
-  (window as any).__newTask = () => { persistRunNow().then(() => resetToNew()); };
+  (window as any).__newTask = () => {
+    persistRunNow().then(() => resetToNew());
+  };
 
-  // Load initial history and repair if needed
-  refreshHistory();
-  window.electronAPI.agent.repairHistory?.().catch(() => {});
-
-  const displayRun = () => viewMode() === "running" ? activeRun() : viewMode() === "history" ? selectedRun() : null;
-  const isRunning = () => !!activeRun() && ["running","capturing","thinking","acting","waiting"].includes(activeRun()!.status);
-
-  const sd = () => setTimeout(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight, behavior: "smooth" }), 60);
-
-  createEffect(() => {
-    const r = activeRun();
-    if (r && ["running","capturing","thinking","acting","waiting"].includes(r.status)) {
-      timer = window.setInterval(() => { setElapsed(p => p + 1000); uf(); }, 1000);
-    } else { if (timer) { clearInterval(timer); timer = null; } }
+  onMount(() => {
+    refreshHistory();
+    window.electronAPI.agent.repairHistory?.().catch(() => {});
   });
-  onCleanup(() => { if (timer) clearInterval(timer); if (persistTimer) clearTimeout(persistTimer); listeners.forEach(f => f()); });
 
-  // Register listeners ONCE
+  const displayRun = () => (viewMode() === "running" ? activeRun() : viewMode() === "history" ? selectedRun() : null);
+  const isRunning = () => running(activeRun());
+  const scrollDown = () => setTimeout(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight, behavior: "smooth" }), 60);
+
   createEffect(() => {
-    listeners.forEach(f => f()); listeners = [];
-    listeners.push(
-      window.electronAPI.agent.onStdout((d: { text: string }) => {
-        setActiveRun(p => {
-          if (!p) return p;
-          const evt = parseAgentStdoutLine(d.text, p.currentStep);
-          const next = applyAgentEventToRun(p, evt);
+    const run = activeRun();
+    if (running(run)) {
+      if (!timer) timer = window.setInterval(() => setElapsed((value) => value + 1000), 1000);
+    } else if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  });
+
+  createEffect(() => {
+    listeners.forEach((dispose) => dispose());
+    listeners = [
+      window.electronAPI.agent.onStdout((data: { text: string }) => {
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const next = applyAgentEventToRun(prev, parseAgentStdoutLine(data.text, prev.currentStep));
           persistRun(next);
           return next;
         });
-        sd(); uf();
+        scrollDown();
+        updateFloating();
       }),
-      window.electronAPI.agent.onEvent((evt: AgentEvent) => {
-        he(evt); sd(); uf();
+      window.electronAPI.agent.onEvent((event: AgentEvent) => {
+        handleAgentEvent(event);
+        scrollDown();
+        updateFloating();
       }),
-      window.electronAPI.agent.onFinished(d => {
-        const s = d.exitCode === 0 ? "completed" : "failed";
-        setActiveRun(p => {
-          if (!p) return p;
-          const now = Date.now();
-          const steps = p.steps.map(st => {
-            if (["running","capturing","thinking","acting","waiting"].includes(st.status)) {
-              return { ...st, status: s === "completed" ? "completed" as any : "failed" as any, endedAt: now, durationMs: now - st.startedAt,
-                phases: { ...st.phases,
-                  capture: { ...st.phases.capture, status: st.phases.capture.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.capture.status },
-                  ai: { ...st.phases.ai, status: st.phases.ai.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.ai.status },
-                  action: { ...st.phases.action, status: st.phases.action.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.action.status },
-                } };
-            }
-            return st;
-          });
-          return { ...p, status: s as any, endedAt: now, steps, currentActionText: s === "completed" ? "任务已完成" : "任务执行失败" };
-        });
-        persistRunNow();
-        // Update floating orb with terminal status
-        const r = activeRun();
-        if (r) {
-          window.electronAPI.floating.update({
-            status: s,
-            currentStep: r.currentStep,
-            maxSteps: r.maxSteps,
-            actionText: s === "completed" ? "任务已完成" : "任务执行失败",
-            instruction: r.instruction,
-            currentPhase: s,
-            progressPercent: s === "completed" ? 100 : r.steps.filter(st => st.status === "completed" || st.status === "failed").length > 0 ? 50 : 0,
-          });
-        }
-        if (s === "failed") {
-          setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
-        }
-        setTimeout(() => window.electronAPI.floating.hide(), 3000);
-      }),
-      window.electronAPI.agent.onError(d => {
-        setActiveRun(p => {
-          if (!p) return p;
-          const now = Date.now();
-          const steps = p.steps.map(st => {
-            if (["running","capturing","thinking","acting","waiting"].includes(st.status)) {
-              return { ...st, status: "failed" as any, endedAt: now, durationMs: now - st.startedAt,
-                phases: { ...st.phases, capture: { ...st.phases.capture, status: st.phases.capture.status === "running" ? "error" as any : st.phases.capture.status }, ai: { ...st.phases.ai, status: st.phases.ai.status === "running" ? "error" as any : st.phases.ai.status }, action: { ...st.phases.action, status: st.phases.action.status === "running" ? "error" as any : st.phases.action.status } } };
-            }
-            return st;
-          });
-          return { ...p, status: "failed", endedAt: now, steps, currentActionText: "任务执行失败" };
-        });
-        persistRunNow();
-        // Update floating orb — red failed state, then show main window
-        const r = activeRun();
-        if (r) {
-          window.electronAPI.floating.update({
-            status: "failed",
-            currentStep: r.currentStep,
-            maxSteps: r.maxSteps,
-            actionText: "任务执行失败",
-            instruction: r.instruction,
-            currentPhase: "error",
-          });
-        }
-        setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
-        setTimeout(() => window.electronAPI.floating.hide(), 3000);
-      }),
+      window.electronAPI.agent.onFinished((data) => finishRun(data.exitCode === 0 ? "completed" : "failed")),
+      window.electronAPI.agent.onError(() => finishRun("failed")),
       (window as any).desktopAgent?.onHistoryUpdated?.(() => refreshHistory()) || (() => {}),
-    );
+    ];
   });
-  onCleanup(() => listeners.forEach(f => f()));
 
-  function he(evt: AgentEvent) {
-    switch (evt.type) {
+  onCleanup(() => {
+    if (timer) clearInterval(timer);
+    if (persistTimer) clearTimeout(persistTimer);
+    listeners.forEach((dispose) => dispose());
+  });
+
+  function finishRun(status: "completed" | "failed") {
+    setActiveRun((prev) => {
+      if (!prev) return prev;
+      const timestamp = Date.now();
+      return {
+        ...prev,
+        status,
+        endedAt: timestamp,
+        steps: prev.steps.map((step) =>
+          RUNNING_STATUSES.includes(step.status)
+            ? {
+                ...step,
+                status,
+                endedAt: timestamp,
+                durationMs: timestamp - step.startedAt,
+                phases: {
+                  capture: {
+                    ...step.phases.capture,
+                    status: step.phases.capture.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.capture.status,
+                  },
+                  ai: {
+                    ...step.phases.ai,
+                    status: step.phases.ai.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.ai.status,
+                  },
+                  action: {
+                    ...step.phases.action,
+                    status: step.phases.action.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.action.status,
+                  },
+                },
+              }
+            : step,
+        ),
+        currentActionText: status === "completed" ? "任务已完成" : "任务执行失败",
+      };
+    });
+    persistRunNow();
+    const run = activeRun();
+    if (run) {
+      window.electronAPI.floating.update({
+        status,
+        currentStep: run.currentStep,
+        maxSteps: run.maxSteps,
+        actionText: status === "completed" ? "任务已完成" : "任务执行失败",
+        instruction: run.instruction,
+        currentPhase: status,
+        progressPercent: status === "completed" ? 100 : 50,
+      });
+    }
+    if (status === "failed") setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 1200);
+    setTimeout(() => window.electronAPI.floating.hide(), 2600);
+  }
+
+  function handleAgentEvent(event: AgentEvent) {
+    switch (event.type) {
       case "run_started":
         setElapsed(0);
         setActiveRun({
-          id: evt.runId, instruction: evt.instruction, status: "running",
-          createdAt: Date.now(), startedAt: Date.now(), elapsedMs: 0,
-          currentStep: 0, maxSteps: evt.maxSteps,
-          currentActionText: "正在启动 Agent…",
-          compactPlan: inferCompactPlanFromInstruction(evt.instruction),
-          steps: [], rawLogs: [], outputDir: evt.outputDir, modelName: evt.modelName,
+          id: event.runId,
+          instruction: event.instruction,
+          status: "running",
+          createdAt: Date.now(),
+          startedAt: Date.now(),
+          elapsedMs: 0,
+          currentStep: 0,
+          maxSteps: event.maxSteps,
+          currentActionText: "正在启动 Agent",
+          compactPlan: inferCompactPlanFromInstruction(event.instruction),
+          steps: [],
+          rawLogs: [],
+          outputDir: event.outputDir,
+          modelName: event.modelName,
         });
-        setViewMode("running"); setSelectedRun(null);
-        window.electronAPI.floating.show(); uf(); persistRun(activeRun()!);
+        setViewMode("running");
+        setSelectedRun(null);
+        window.electronAPI.floating.show();
+        persistRun(activeRun()!);
         break;
       case "step_started":
-        setActiveRun(p => { if (!p) return p; return applyAgentEventToRun(p, parseAgentStdoutLine(`STEP ${evt.step}`, evt.step)); });
+        setActiveRun((prev) => (prev ? applyAgentEventToRun(prev, parseAgentStdoutLine(`STEP ${event.step}`, event.step)) : prev));
         break;
       case "output":
-        setActiveRun(p => {
-          if (!p) return p;
-          const ui = parseAgentStdoutLine(evt.text, p.currentStep);
-          const next = applyAgentEventToRun(p, ui);
-          const idx = next.steps.length - 1;
-          if (idx >= 0) {
-            next.steps[idx].rawModelOutput = (next.steps[idx].rawModelOutput || "") + evt.text + "\n";
-            try { const m = evt.text.match(/<tool_call>(.*?)<\/tool_call>/s); if (m) next.steps[idx].rawToolCall = JSON.parse(m[1]); } catch {}
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const next = applyAgentEventToRun(prev, parseAgentStdoutLine(event.text, prev.currentStep));
+          const lastIndex = next.steps.length - 1;
+          if (lastIndex >= 0) {
+            next.steps[lastIndex].rawModelOutput = (next.steps[lastIndex].rawModelOutput || "") + event.text + "\n";
+            try {
+              const match = event.text.match(/<tool_call>(.*?)<\/tool_call>/s);
+              if (match) next.steps[lastIndex].rawToolCall = JSON.parse(match[1]);
+            } catch {}
           }
           return next;
         });
         break;
       case "screenshot":
-        setActiveRun(p => {
-          if (!p) return p;
-          const ss = [...p.steps]; const idx = Math.min(p.currentStep, ss.length - 1);
-          if (idx >= 0 && idx < ss.length) ss[idx] = { ...ss[idx], screenshotPath: evt.path, phases: { ...ss[idx].phases, capture: { ...ss[idx].phases.capture, status: "success", screenshotPath: evt.path, message: "截图获取：屏幕截图已完成" } } };
-          return { ...p, steps: ss, currentActionText: "截图已捕获" };
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const steps = [...prev.steps];
+          const index = Math.min(prev.currentStep, steps.length - 1);
+          if (index >= 0) {
+            steps[index] = {
+              ...steps[index],
+              screenshotPath: event.path,
+              phases: {
+                ...steps[index].phases,
+                capture: { ...steps[index].phases.capture, status: "success", screenshotPath: event.path, message: "屏幕截图已完成" },
+              },
+            };
+          }
+          return { ...prev, steps, currentActionText: "已获取屏幕截图" };
         });
         break;
       case "annotated_screenshot":
-        setActiveRun(p => {
-          if (!p) return p;
-          const ss = [...p.steps]; const idx = p.currentStep >= 0 && p.currentStep < ss.length ? p.currentStep : ss.length - 1;
-          if (idx >= 0) ss[idx] = { ...ss[idx], annotatedPath: evt.path, screenshotPath: ss[idx].screenshotPath || evt.path, status: "completed", durationMs: Date.now() - ss[idx].startedAt, phases: { ...ss[idx].phases, capture: { ...ss[idx].phases.capture, screenshotPath: evt.path, status: "success", message: "截图获取：屏幕截图已完成" }, action: { ...ss[idx].phases.action, status: "success", message: "决策执行：动作执行完成" } } };
-          return { ...p, steps: ss, currentActionText: "动作执行完成" };
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const steps = [...prev.steps];
+          const index = prev.currentStep >= 0 && prev.currentStep < steps.length ? prev.currentStep : steps.length - 1;
+          if (index >= 0) {
+            steps[index] = {
+              ...steps[index],
+              annotatedPath: event.path,
+              screenshotPath: steps[index].screenshotPath || event.path,
+              status: "completed",
+              durationMs: Date.now() - steps[index].startedAt,
+              phases: {
+                ...steps[index].phases,
+                capture: { ...steps[index].phases.capture, screenshotPath: event.path, status: "success", message: "屏幕截图已完成" },
+                action: { ...steps[index].phases.action, status: "success", message: "桌面操作已完成" },
+              },
+            };
+          }
+          return { ...prev, steps, currentActionText: "桌面操作已完成" };
         });
         break;
       case "run_finished":
-        setActiveRun(p => {
-          if (!p) return p;
-          const s = evt.status === "success" ? "completed" : "failed";
-          const now = Date.now();
-          const steps = p.steps.map(st => {
-            if (["running","capturing","thinking","acting","waiting"].includes(st.status)) {
-              return { ...st, status: s === "completed" ? "completed" as any : "failed" as any, endedAt: now, durationMs: now - st.startedAt,
-                phases: { ...st.phases, capture: { ...st.phases.capture, status: st.phases.capture.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.capture.status }, ai: { ...st.phases.ai, status: st.phases.ai.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.ai.status }, action: { ...st.phases.action, status: st.phases.action.status === "running" ? (s === "completed" ? "success" : "error") as any : st.phases.action.status } } };
-            }
-            return st;
-          });
-          return { ...p, status: s as any, endedAt: now, steps, currentActionText: s === "completed" ? "任务已完成" : "任务执行失败" };
-        });
-        persistRunNow();
-        // Update floating orb
-        const r2 = activeRun();
-        if (r2) {
-          window.electronAPI.floating.update({
-            status: evt.status === "success" ? "completed" : "failed",
-            currentStep: r2.currentStep,
-            maxSteps: r2.maxSteps,
-            actionText: evt.status === "success" ? "任务已完成" : "任务执行失败",
-            instruction: r2.instruction,
-            currentPhase: evt.status === "success" ? "completed" : "failed",
-            progressPercent: evt.status === "success" ? 100 : 50,
-          });
-        }
-        if (evt.status !== "success") {
-          setTimeout(() => window.electronAPI.floating.showMainWindow?.(), 3000);
-        }
-        setTimeout(() => window.electronAPI.floating.hide(), 3000);
+        finishRun(event.status === "success" ? "completed" : "failed");
         break;
     }
   }
 
-  async function uf() {
-    const r = activeRun();
-    if (!r || !["running","capturing","thinking","acting","waiting"].includes(r.status)) return;
-
-    // Current phase from step phases (check pending phases, not "running")
-    let currentPhase = "";
-    const last = r.steps[r.steps.length - 1];
-    if (last) {
-      if (last.phases.capture.status === "pending") currentPhase = "capturing";
-      else if (last.phases.ai.status === "pending") currentPhase = "thinking";
-      else if (last.phases.action.status === "pending") currentPhase = "acting";
-      else currentPhase = r.status;
-    }
-
-    // Progress: completed steps + fractional phase progress within current step
-    const done = r.steps.filter(s => s.status === "completed" || s.status === "failed").length;
-    const total = Math.max(done + 1, r.steps.length);
-    let frac = 0;
-    if (last) {
-      const cnt = [last.phases.capture, last.phases.ai, last.phases.action]
-        .filter(p => p.status === "success" || p.status === "error").length;
-      const run = [last.phases.capture, last.phases.ai, last.phases.action]
-        .some(p => p.status === "running");
-      frac = run ? (cnt + 0.5) / 3 : cnt / 3;
-    }
-    const progressPercent = Math.min(100, Math.round(((done + frac) / total) * 100));
-
+  async function updateFloating() {
+    const run = activeRun();
+    if (!run || !running(run)) return;
+    const last = run.steps[run.steps.length - 1];
+    const currentPhase = (() => {
+      if (!last) return run.status;
+      if (last.phases.capture.status === "running" || last.phases.capture.status === "pending") return "capturing";
+      if (last.phases.ai.status === "running" || last.phases.ai.status === "pending") return "thinking";
+      if (last.phases.action.status === "running" || last.phases.action.status === "pending") return "acting";
+      return run.status;
+    })();
+    const completed = run.steps.filter((step) => step.status === "completed" || step.status === "failed").length;
+    const total = Math.max(completed + 1, run.steps.length, 1);
+    const phaseDone = last
+      ? [last.phases.capture, last.phases.ai, last.phases.action].filter((phase) => phase.status === "success" || phase.status === "error").length / 3
+      : 0;
+    const progressPercent = Math.min(96, Math.round(((completed + phaseDone) / total) * 100));
     await window.electronAPI.floating.update({
-      status: r.status,
-      currentStep: r.currentStep,
-      maxSteps: r.maxSteps,
-      actionText: r.currentActionText,
+      status: run.status,
+      currentStep: run.currentStep + 1,
+      maxSteps: run.maxSteps,
+      actionText: run.currentActionText,
       elapsedMs: elapsed(),
-      instruction: r.instruction,
-      currentPhase: currentPhase || r.status,
+      instruction: run.instruction,
+      currentPhase,
       progressPercent,
     });
   }
 
-  async function start(instr: string) {
-    const ak = await window.electronAPI.config.getApiKey(); if (!ak) { alert("请先在设置中配置 API Key"); return; }
-    const cfg = await window.electronAPI.config.get();
+  async function start(instruction: string) {
+    const text = instruction.trim();
+    if (!text || isRunning()) return;
+    const apiKey = await window.electronAPI.config.getApiKey();
+    if (!apiKey) {
+      alert("请先在设置中配置 API Key");
+      return;
+    }
+    const config = await window.electronAPI.config.get();
     if (!defaultOutputDir) defaultOutputDir = await window.electronAPI.agent.getDefaultOutputDir();
-    const dir = `${defaultOutputDir}/run_${Date.now()}`;
-    setActiveRun(null); setSelectedRun(null); setElapsed(0); setViewMode("new");
-    const res = await window.electronAPI.agent.start({ instruction: instr, apiKey: ak, baseUrl: cfg.baseUrl, modelName: cfg.modelName, maxSteps: 50, outputDir: dir });
-    if (!res.ok) alert(res.error);
+    const outputDir = `${defaultOutputDir}/run_${Date.now()}`;
+    setActiveRun(null);
+    setSelectedRun(null);
+    setElapsed(0);
+    setViewMode("new");
+    const result = await window.electronAPI.agent.start({
+      instruction: text,
+      apiKey,
+      baseUrl: config.baseUrl,
+      modelName: config.modelName,
+      maxSteps: 50,
+      outputDir,
+    });
+    if (!result.ok) alert(result.error);
   }
+
   async function stop() {
     await window.electronAPI.agent.stop();
-    setActiveRun(p => {
-      if (!p) return p;
-      const now = Date.now();
-      const steps = p.steps.map(st => {
-        if (["running","capturing","thinking","acting","waiting"].includes(st.status)) {
-          return { ...st, status: "stopped" as any, endedAt: now, durationMs: now - st.startedAt,
-            phases: { ...st.phases, capture: { ...st.phases.capture, status: st.phases.capture.status === "running" ? "error" as any : st.phases.capture.status }, ai: { ...st.phases.ai, status: st.phases.ai.status === "running" ? "error" as any : st.phases.ai.status }, action: { ...st.phases.action, status: st.phases.action.status === "running" ? "error" as any : st.phases.action.status } } };
-        }
-        return st;
-      });
-      return { ...p, status: "stopped", endedAt: now, steps, currentActionText: "任务已被用户停止" };
+    setActiveRun((prev) => (prev ? { ...prev, status: "stopped", endedAt: Date.now(), currentActionText: "任务已停止" } : prev));
+    window.electronAPI.floating.update({ status: "stopped", actionText: "任务已停止", currentPhase: "stopped" });
+    setTimeout(() => window.electronAPI.floating.hide(), 800);
+    persistRunNow();
+  }
+
+  function updatePrompt(card: PromptCard) {
+    setPrompts((items) => {
+      const next = items.map((item) => (item.id === card.id ? card : item));
+      savePrompts(next);
+      return next;
     });
-    window.electronAPI.floating.hide(); persistRunNow();
+  }
+
+  function addPrompt() {
+    const next = [
+      ...prompts(),
+      {
+        id: `custom-${Date.now()}`,
+        title: "新的常用指令",
+        description: "点击编辑，写成你经常使用的完整任务。",
+        prompt: "请把这里改成一个具体、可执行的任务指令。",
+        accent: "blue",
+      },
+    ];
+    setPrompts(next);
+    savePrompts(next);
+  }
+
+  function removePrompt(id: string) {
+    const next = prompts().filter((item) => item.id !== id);
+    setPrompts(next);
+    savePrompts(next);
   }
 
   return (
-    <div class="flex-1 flex flex-col min-h-0" style="background:var(--bg-main)">
+    <div class="agent-shell">
       <Show when={displayRun() !== null}>
-        <header class="flex items-center justify-between px-5 py-2.5 border-b shrink-0" style="background:var(--bg-sidebar);border-color:var(--border-light)">
-          <div class="flex items-center gap-3 text-sm" style="color:var(--text-secondary)">
-            <div data-component="status-badge" data-status={displayRun()!.status}>{stLab(displayRun()!.status)}</div>
-            <Show when={displayRun()?.modelName}><span class="text-xs" style="color:var(--text-tertiary);font-family:var(--font-family-mono)">{displayRun()?.modelName}</span></Show>
-            <Show when={isRunning()}><span>Step {displayRun()?.currentStep}/{displayRun()?.maxSteps}</span></Show>
-            <Show when={viewMode() === "history"}><span class="text-xs" style="color:var(--text-tertiary)">[历史记录]</span></Show>
+        <header class="run-header">
+          <div class="run-meta">
+            <div data-component="status-badge" data-status={displayRun()!.status}>
+              <span data-slot="status-dot" />
+              {statusLabel(displayRun()!.status)}
+            </div>
+            <Show when={displayRun()?.modelName}>
+              <span class="run-model">{displayRun()?.modelName}</span>
+            </Show>
+            <Show when={isRunning()}>
+              <span class="run-step">第 {(displayRun()?.currentStep || 0) + 1} 步 / 最多 {displayRun()?.maxSteps} 步</span>
+            </Show>
+            <Show when={viewMode() === "history"}>
+              <span class="run-history-badge">历史记录</span>
+            </Show>
           </div>
           <Show when={isRunning()}>
-            <button data-component="button" data-variant="danger" data-size="sm" onClick={stop}>停止</button>
+            <button data-component="button" data-variant="danger" data-size="sm" onClick={stop}>
+              停止任务
+            </button>
           </Show>
         </header>
       </Show>
-      <div ref={scrollRef} class="flex-1 overflow-y-auto" style="padding:24px 32px">
-        <div style="max-width:980px;margin:0 auto">
-          <Show when={displayRun()} fallback={<Home onStart={start} />}>
-            {(r) => <Dash r={r()} />}
-          </Show>
-        </div>
+
+      <div ref={scrollRef} class="agent-scroll">
+        <Show when={displayRun()} fallback={<Home prompts={prompts()} onStart={start} onAdd={addPrompt} onUpdate={updatePrompt} onRemove={removePrompt} />}>
+          {(run) => <Dashboard run={run()} />}
+        </Show>
       </div>
-      {viewMode() !== "new" && (
-        <div class="shrink-0" style="background:var(--bg-main);padding:0 32px 20px">
-          <div style="max-width:980px;margin:0 auto">
-            <Composer onRun={start} onStop={stop} running={isRunning()} />
-          </div>
+
+      <Show when={viewMode() !== "new"}>
+        <div class="bottom-composer">
+          <Composer onRun={start} onStop={stop} running={isRunning()} />
         </div>
-      )}
+      </Show>
     </div>
   );
 }
 
-function stLab(s: string) { const m: Record<string,string>={idle:"空闲",running:"运行中",capturing:"截图中",thinking:"AI分析中",acting:"执行中",waiting:"等待中",completed:"已完成",failed:"失败",stopped:"已停止"};return m[s]||s; }
-
-function Dash(props: { r: AgentRun }) {
-  const r = () => props.r;
-  return (<div class="agent-dash"><div class="dash-summary"><h2 class="text-xl font-bold text-[#111827] mb-3">{r().instruction}</h2><div class="flex flex-wrap gap-x-5 gap-y-1 text-base" style="color:#475467"><span>Step {r().currentStep}/{r().maxSteps}</span><span style="color:var(--brand)">当前：{r().currentActionText||"准备开始"}</span></div></div><TaskPlanBubble items={r().compactPlan}/><AgentTimeline steps={r().steps} currentStep={r().currentStep}/></div>);
+function Dashboard(props: { run: AgentRun }) {
+  const run = () => props.run;
+  return (
+    <div class="agent-dash">
+      <section class="dash-summary">
+        <div class="dash-kicker">当前任务</div>
+        <h1>{run().instruction}</h1>
+        <div class="dash-current">
+          <span>{statusLabel(run().status)}</span>
+          <strong>{run().currentActionText || "准备开始"}</strong>
+        </div>
+      </section>
+      <TaskPlanBubble items={run().compactPlan} />
+      <AgentTimeline steps={run().steps} currentStep={run().currentStep} />
+    </div>
+  );
 }
 
-function Home(props: { onStart: (s: string) => void }) {
-  const [t, st] = createSignal("");
-  return (<div class="animate-fade-in" style="padding-top:60px"><h1 class="text-2xl font-bold text-[var(--text-primary)] mb-2">今天想让我帮你做什么？</h1><p class="text-base text-[var(--text-secondary)] mb-8">我可以观察屏幕、理解界面，并帮你完成跨应用操作。</p><div class="dash-summary" style="padding:24px"><textarea class="w-full resize-none border-none outline-none" style="font-family:inherit;font-size:18px;color:var(--text-primary);min-height:80px;background:transparent" placeholder="请输入任务，交给我来帮你完成" value={t()} onInput={e=>st(e.currentTarget.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();props.onStart(t());st("")}}}/><div class="flex items-center justify-between mt-3"><span class="text-xs" style="color:var(--text-tertiary)">Agent 将控制你的鼠标和键盘 · 按 Esc 紧急停止</span><button data-component="button" data-variant="primary" data-size="lg" onClick={()=>{props.onStart(t());st("")}} disabled={!t().trim()}>执行任务</button></div></div><h2 class="text-lg font-semibold text-[var(--text-primary)] mb-3 mt-8">推荐任务</h2><div class="grid grid-cols-2 gap-3">{RECS.map((item,i)=><div key={i} class="dash-summary cursor-pointer hover:translate-y-[-2px] hover:shadow-lg transition-all" style="padding:16px 20px" onClick={()=>st(item.p)}><p class="text-sm font-semibold text-[var(--text-primary)] mb-1">{item.t}</p><p class="text-xs text-[var(--text-tertiary)]">{item.d}</p></div>)}</div></div>);
+function Home(props: {
+  prompts: PromptCard[];
+  onStart: (instruction: string) => void;
+  onAdd: () => void;
+  onUpdate: (card: PromptCard) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [text, setText] = createSignal("");
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+
+  function submit() {
+    const value = text().trim();
+    if (!value) return;
+    props.onStart(value);
+    setText("");
+  }
+
+  return (
+    <main class="home-stage">
+      <section class="hero-panel">
+        <div class="hero-orbit">
+          <span />
+          <span />
+          <span />
+        </div>
+        <div class="hero-copy">
+          <div class="hero-eyebrow">Cross-Application Agent</div>
+          <h1>
+            需要我接手哪一步？
+            <span>我会边观察边执行。</span>
+          </h1>
+          <p>把任务说清楚就行，比如“把报告发送给文件传输助手”或“整理桌面并检查结果”。</p>
+        </div>
+        <div class="hero-status-strip">
+          <span>观察屏幕</span>
+          <span>理解界面</span>
+          <span>执行操作</span>
+          <span>验证结果</span>
+        </div>
+      </section>
+
+      <section class="home-composer-card">
+        <textarea
+          value={text()}
+          onInput={(event) => setText(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="告诉我你的目标，我来一步步操作电脑完成它。"
+        />
+        <div class="composer-actions">
+          <div class="safety-note">
+            <span>!</span>
+            Agent 会控制鼠标和键盘。任务执行时可随时点击停止任务。
+          </div>
+          <button data-component="button" data-variant="primary" data-size="lg" onClick={submit} disabled={!text().trim()}>
+            开始执行
+          </button>
+        </div>
+      </section>
+
+      <section class="prompt-section">
+        <div class="prompt-head">
+          <div>
+            <h2>常用指令</h2>
+            <p>把卡片改成你最常用、最具体的任务，下次一点就能填入输入框。</p>
+          </div>
+          <button data-component="button" data-variant="secondary" data-size="sm" onClick={props.onAdd}>
+            新增指令
+          </button>
+        </div>
+
+        <div class="prompt-grid">
+          <For each={props.prompts}>
+            {(card, index) => (
+              <PromptCardView
+                card={card}
+                index={index()}
+                editing={editingId() === card.id}
+                onUse={() => setText(card.prompt)}
+                onEdit={() => setEditingId(card.id)}
+                onCancel={() => setEditingId(null)}
+                onRemove={() => props.onRemove(card.id)}
+                onSave={(next) => {
+                  props.onUpdate(next);
+                  setEditingId(null);
+                }}
+              />
+            )}
+          </For>
+        </div>
+      </section>
+    </main>
+  );
 }
 
-function Composer(props: { onRun: (s: string) => void; onStop: () => void; running: boolean }) {
-  const [t, st] = createSignal("");
-  function sub() { if (props.running) { props.onStop(); return; } const x = t().trim(); if (!x) return; props.onRun(x); st(""); }
-  const isDisabled = () => !props.running && !t().trim();
-  return (<div class="composer"><div class="composer-card"><textarea class="composer-textarea" placeholder="请输入任务，交给我来帮你完成" value={t()} onInput={e=>st(e.currentTarget.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sub()}}} disabled={props.running}/><button class="composer-send-btn" classList={{running:props.running}} disabled={isDisabled()} onClick={sub} title={props.running?"停止":"发送"}>{props.running?(<svg viewBox="0 0 24 24" fill="#dc2626"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>):(<svg viewBox="0 0 24 24" fill="none" stroke={isDisabled()?"#cbd5e1":"#2563eb"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>)}</button></div><p class="composer-hint">Agent 将控制你的鼠标和键盘 · 按 Esc 紧急停止</p></div>);
+function PromptCardView(props: {
+  card: PromptCard;
+  index: number;
+  editing: boolean;
+  onUse: () => void;
+  onEdit: () => void;
+  onCancel: () => void;
+  onRemove: () => void;
+  onSave: (card: PromptCard) => void;
+}) {
+  const [title, setTitle] = createSignal(props.card.title);
+  const [description, setDescription] = createSignal(props.card.description);
+  const [prompt, setPrompt] = createSignal(props.card.prompt);
+
+  createEffect(() => {
+    if (props.editing) {
+      setTitle(props.card.title);
+      setDescription(props.card.description);
+      setPrompt(props.card.prompt);
+    }
+  });
+
+  return (
+    <article class={`prompt-card prompt-${props.card.accent}`} style={{ "--delay": `${props.index * 55}ms` }}>
+      <Show
+        when={props.editing}
+        fallback={
+          <>
+            <button class="prompt-card-main" onClick={props.onUse}>
+              <span class="prompt-mark">✦</span>
+              <strong>{props.card.title}</strong>
+              <small>{props.card.description}</small>
+            </button>
+            <div class="prompt-card-actions">
+              <button onClick={props.onEdit}>编辑</button>
+              <button onClick={props.onRemove}>删除</button>
+            </div>
+          </>
+        }
+      >
+        <div class="prompt-edit">
+          <input value={title()} onInput={(event) => setTitle(event.currentTarget.value)} />
+          <input value={description()} onInput={(event) => setDescription(event.currentTarget.value)} />
+          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} />
+          <div class="prompt-edit-actions">
+            <button onClick={props.onCancel}>取消</button>
+            <button
+              onClick={() =>
+                props.onSave({
+                  ...props.card,
+                  title: title().trim() || "未命名指令",
+                  description: description().trim(),
+                  prompt: prompt().trim(),
+                })
+              }
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </Show>
+    </article>
+  );
+}
+
+function Composer(props: { onRun: (instruction: string) => void; onStop: () => void; running: boolean }) {
+  const [text, setText] = createSignal("");
+  const disabled = () => !props.running && !text().trim();
+
+  function submit() {
+    if (props.running) {
+      props.onStop();
+      return;
+    }
+    const value = text().trim();
+    if (!value) return;
+    props.onRun(value);
+    setText("");
+  }
+
+  return (
+    <div class="composer">
+      <div class="composer-card">
+        <textarea
+          class="composer-textarea"
+          placeholder="继续告诉我下一项任务，我会按当前桌面状态接着处理。"
+          value={text()}
+          onInput={(event) => setText(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+          disabled={props.running}
+        />
+        <button class="composer-send-btn" classList={{ running: props.running }} disabled={disabled()} onClick={submit} title={props.running ? "停止任务" : "发送任务"}>
+          <Show when={props.running} fallback={<span>↑</span>}>
+            <span>■</span>
+          </Show>
+        </button>
+      </div>
+      <p class="composer-hint">执行中请保持目标窗口可见；出现异常时可点击停止任务。</p>
+    </div>
+  );
 }

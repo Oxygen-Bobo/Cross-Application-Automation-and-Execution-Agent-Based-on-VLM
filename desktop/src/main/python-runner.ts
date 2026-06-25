@@ -18,7 +18,9 @@ function getPythonCommand(): string {
 function sendToRenderer(evt: string, data: unknown) {
   const wins = BrowserWindow.getAllWindows();
   for (const w of wins) {
-    w.webContents.send(evt, data);
+    if (!w.isDestroyed() && !w.webContents.isDestroyed()) {
+      w.webContents.send(evt, data);
+    }
   }
 }
 

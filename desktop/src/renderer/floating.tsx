@@ -1,37 +1,50 @@
-/* Floating Orb — polished light theme, distinct phase icons,
-   progress ring only, popover fully in window bounds. */
-
-type S = {
-  st: string; p: number; step?: number; tot?: number;
-  task: string; act: string; msg: string;
+type OrbState = {
+  status: string;
+  progress: number;
+  step?: number;
+  total?: number;
+  task: string;
+  action: string;
 };
 
-const META: Record<string, [string, string]> = {
-  idle:["⚡","空闲"],capturing:["📸","截图中"],
-  thinking:["🧠","思考中"],planning:["📋","规划中"],observing:["👁","观察中"],
-  running:["▶","运行中"],acting:["🖱","执行中"],
-  waiting:["⏳","等待确认"],
-  success:["✓","已完成"],completed:["✓","已完成"],
-  error:["✕","异常"],failed:["✕","失败"],stopped:["■","已停止"],
+const META: Record<string, { icon: string; label: string; accent: string; tone: string }> = {
+  idle: { icon: "✦", label: "空闲", accent: "#8b8177", tone: "neutral" },
+  running: { icon: "↗", label: "运行中", accent: "#2f6b5c", tone: "active" },
+  capturing: { icon: "◎", label: "屏幕观察", accent: "#2f6b5c", tone: "active" },
+  thinking: { icon: "✦", label: "界面理解", accent: "#8a5a2f", tone: "active" },
+  acting: { icon: "↗", label: "桌面执行", accent: "#2f6b5c", tone: "active" },
+  waiting: { icon: "?", label: "等待响应", accent: "#b9742d", tone: "warn" },
+  completed: { icon: "✓", label: "任务完成", accent: "#2f6b5c", tone: "success" },
+  success: { icon: "✓", label: "任务完成", accent: "#2f6b5c", tone: "success" },
+  failed: { icon: "!", label: "任务失败", accent: "#a84227", tone: "danger" },
+  error: { icon: "!", label: "任务失败", accent: "#a84227", tone: "danger" },
+  stopped: { icon: "■", label: "已停止", accent: "#8b8177", tone: "neutral" },
 };
 
-// Colors from tokens.css: brand/#2563eb, success/#16a34a, warning/#f59e0b, danger/#ef4444
-const ACCENT: Record<string, string> = {
-  idle:"#8f99a8",stopped:"#8f99a8",
-  capturing:"#0891b2",                    // cyan-600
-  thinking:"#7c3aed",planning:"#7c3aed",observing:"#7c3aed", // violet-600
-  running:"#2563eb",acting:"#2563eb",     // brand blue
-  waiting:"#f59e0b",                      // warning amber
-  success:"#16a34a",completed:"#16a34a",  // success green
-  error:"#ef4444",failed:"#ef4444",       // danger red
-};
+const PHASE_INDEX: Record<string, number> = { capturing: 0, thinking: 1, acting: 2 };
 
-function cs(r:string){
-  const m:Record<string,string>={capturing:"capturing",thinking:"thinking",planning:"planning",observing:"observing",acting:"acting",waiting:"waiting",running:"running",completed:"success",failed:"error",stopped:"stopped",success:"success",error:"error"};
-  return m[r]||r||"idle";
+function canonical(status?: string) {
+  const value = status || "idle";
+  const map: Record<string, string> = {
+    planning: "thinking",
+    observing: "capturing",
+    completed: "completed",
+    success: "completed",
+    failed: "failed",
+    error: "failed",
+  };
+  return map[value] || value;
 }
-function cl(v:number){return Math.max(0,Math.min(100,Math.round(v)))}
-function fs(st?:number,tot?:number){if(st==null)return"暂无步骤";if(tot)return`步骤 ${st} / ${tot}`;return`第 ${st} 步`}
+
+function clamp(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function stepText(step?: number, total?: number) {
+  if (step == null) return "暂无步骤";
+  if (total) return `第 ${step} / ${total} 步`;
+  return `第 ${step} 步`;
+}
 
 export default function init() {
   const root = document.getElementById("root")!;
@@ -40,96 +53,117 @@ export default function init() {
   const style = document.createElement("style");
   style.textContent = `
     html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
-    .fr{position:relative;width:100%;height:100%;background:transparent;-webkit-app-region:drag;user-select:none;-webkit-user-select:none}
-    /* ---- Orb ---- */
-    .fb{position:absolute;top:12px;left:12px;width:72px;height:72px;border-radius:50%;cursor:pointer;-webkit-app-region:no-drag;background:radial-gradient(circle at 35% 25%,#fff,rgba(245,246,248,.94));box-shadow:0 12px 32px rgba(16,24,40,.10),0 0 0 1px rgba(16,24,40,.06),inset 0 0 0 1px rgba(255,255,255,.6);z-index:10;transition:transform .18s,box-shadow .18s}
-    .fb:hover{transform:scale(1.05);box-shadow:0 16px 40px rgba(16,24,40,.14),0 0 0 1px rgba(16,24,40,.08),inset 0 0 0 1px rgba(255,255,255,.6)}
-    /* ---- Progress ring ---- */
-    .ri{position:absolute;inset:-5px;border-radius:50%;pointer-events:none;z-index:1;filter:drop-shadow(0 0 6px rgba(37,99,235,.15))}
-    /* ---- Icon core ---- */
-    .co{position:absolute;inset:10px;border-radius:50%;display:flex;align-items:center;justify-content:center;z-index:4}
-    .ic{font-size:26px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.06))}
-    /* ---- Popover (inside window, below orb) ---- */
-    .pp{position:absolute;top:96px;left:12px;width:200px;padding:16px 18px;border-radius:16px;color:#1a1d23;background:#fff;box-shadow:0 12px 40px rgba(16,24,40,.10);border:1px solid rgba(16,24,40,.08);opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .16s,visibility .16s,transform .16s;pointer-events:none;z-index:20;-webkit-app-region:no-drag}
-    .fb:hover+.pp{opacity:1;visibility:visible;transform:translateY(0)}
-    .pt{font-size:14px;font-weight:600;color:#111827;margin-bottom:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .pr{display:flex;align-items:flex-start;font-size:12px;line-height:1.65;padding:1px 0}
-    .pr .lb{color:#667085;flex-shrink:0;margin-right:8px;min-width:40px}
-    .pr .vl{color:#1a1d23;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .pb{margin-top:12px;height:4px;border-radius:99px;background:rgba(16,24,40,.06);overflow:hidden}
-    .pf{height:100%;border-radius:inherit;transition:width .5s ease}
+    .orb-root{position:relative;width:100%;height:100%;background:transparent;-webkit-app-region:drag;user-select:none}
+    .orb{position:absolute;top:12px;left:12px;width:78px;height:78px;border:0;border-radius:50%;cursor:pointer;-webkit-app-region:no-drag;background:linear-gradient(145deg,#fffdf7,#efe5d8);box-shadow:0 18px 46px rgba(67,51,34,.24),0 0 0 1px rgba(73,62,50,.13),inset 0 1px 0 rgba(255,255,255,.92);transition:transform .18s ease,box-shadow .18s ease}
+    .orb:hover{transform:translateY(-1px) scale(1.045);box-shadow:0 24px 58px rgba(67,51,34,.28),0 0 0 1px rgba(73,62,50,.18),inset 0 1px 0 rgba(255,255,255,.92)}
+    .orb-ring{position:absolute;inset:-5px;border-radius:50%;pointer-events:none;filter:drop-shadow(0 0 8px rgba(47,107,92,.18))}
+    .orb-core{position:absolute;inset:13px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 38% 26%,#fffdf7,#f1e5d8);box-shadow:inset 0 0 0 1px rgba(73,62,50,.08)}
+    .orb-icon{font-size:28px;font-weight:900;line-height:1;color:#2d261f}
+    .orb-dot{position:absolute;right:8px;bottom:10px;width:13px;height:13px;border:2px solid #fffdf7;border-radius:50%;background:var(--accent,#8b8177)}
+    .phase-mini{position:absolute;left:50%;bottom:6px;display:flex;gap:3px;transform:translateX(-50%);z-index:3}
+    .phase-mini span{width:16px;height:16px;display:grid;place-items:center;border-radius:999px;background:rgba(255,253,247,.78);color:#8b8177;font-size:10px;font-weight:900;box-shadow:0 0 0 1px rgba(73,62,50,.08)}
+    .phase-mini span.active{background:var(--accent,#2f6b5c);color:#fffdf7;box-shadow:0 0 0 2px rgba(255,253,247,.92),0 4px 10px rgba(67,51,34,.2)}
+    .orb.is-active .orb-core{animation:orbBreath 1.45s ease-in-out infinite}
+    .orb.is-danger{background:linear-gradient(145deg,#fff8f4,#f3d8cf)}
+    .orb.is-success{background:linear-gradient(145deg,#f7fff9,#dcece3)}
+    .popover{position:absolute;top:102px;left:12px;width:236px;padding:15px 16px;border:1px solid rgba(73,62,50,.12);border-radius:16px;background:rgba(255,253,247,.97);box-shadow:0 22px 54px rgba(67,51,34,.24);opacity:0;visibility:hidden;transform:translateY(6px);transition:opacity .16s ease,visibility .16s ease,transform .16s ease;-webkit-app-region:no-drag;pointer-events:none}
+    .orb:hover+.popover{opacity:1;visibility:visible;transform:translateY(0)}
+    .pop-title{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:#241f1a;font-size:14px;font-weight:800}
+    .pop-title span{width:9px;height:9px;border-radius:50%;background:var(--accent,#8b8177)}
+    .pop-row{display:grid;grid-template-columns:44px 1fr;gap:8px;padding:2px 0;font-size:12px;line-height:1.55}
+    .pop-label{color:#8b8177}
+    .pop-value{overflow:hidden;color:#3d352e;text-overflow:ellipsis;white-space:nowrap}
+    .pop-bar{height:5px;margin-top:12px;border-radius:999px;background:#ece2d6;overflow:hidden}
+    .pop-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--accent,#2f6b5c),rgba(255,255,255,.4));transition:width .35s ease}
+    @keyframes orbBreath{0%,100%{transform:scale(1)}50%{transform:scale(.94)}}
   `;
   document.head.appendChild(style);
 
   root.innerHTML = `
-    <div class="fr" id="fr">
-      <div class="fb" id="ob">
-        <div class="ri" id="ri"></div>
-        <div class="co"><span class="ic" id="ic">⚡</span></div>
+    <div class="orb-root">
+      <button class="orb" id="orb" title="查看任务状态">
+        <div class="orb-ring" id="orb-ring"></div>
+        <div class="orb-core"><span class="orb-icon" id="orb-icon">✦</span></div>
+        <span class="orb-dot" id="orb-dot"></span>
+        <div class="phase-mini" id="phase-mini">
+          <span>◎</span><span>✦</span><span>↗</span>
+        </div>
+      </button>
+      <div class="popover">
+        <div class="pop-title"><span></span><strong id="pop-title">空闲</strong></div>
+        <div class="pop-row"><span class="pop-label">任务</span><span class="pop-value" id="pop-task">暂无任务</span></div>
+        <div class="pop-row"><span class="pop-label">当前</span><span class="pop-value" id="pop-action">等待下一步</span></div>
+        <div class="pop-row"><span class="pop-label">进度</span><span class="pop-value" id="pop-step">暂无步骤</span></div>
+        <div class="pop-bar"><div class="pop-fill" id="pop-fill"></div></div>
       </div>
-      <div class="pp" id="pp">
-        <div class="pt" id="pt">空闲</div>
-        <div class="pr"><span class="lb">任务：</span><span class="vl" id="vt">暂无任务</span></div>
-        <div class="pr"><span class="lb">当前：</span><span class="vl" id="va">等待下一步</span></div>
-        <div class="pr"><span class="lb">进度：</span><span class="vl" id="vs">暂无步骤</span></div>
-        <div class="pb"><div class="pf" id="pf" style="width:0%"></div></div>
-      </div>
-    </div>`;
+    </div>
+  `;
 
-  const ob=document.getElementById("ob")!,ri=document.getElementById("ri")!;
-  const ic=document.getElementById("ic")!;
-  const pt=document.getElementById("pt")!,vt=document.getElementById("vt")!;
-  const va=document.getElementById("va")!,vs=document.getElementById("vs")!;
-  const pf=document.getElementById("pf")!;
+  const orb = document.getElementById("orb")!;
+  const ring = document.getElementById("orb-ring")!;
+  const icon = document.getElementById("orb-icon")!;
+  const title = document.getElementById("pop-title")!;
+  const task = document.getElementById("pop-task")!;
+  const action = document.getElementById("pop-action")!;
+  const step = document.getElementById("pop-step")!;
+  const fill = document.getElementById("pop-fill")!;
+  const phaseMini = Array.from(document.querySelectorAll("#phase-mini span")) as HTMLElement[];
 
-  let cur:S={st:"idle",p:0,task:"",act:"",msg:"等待任务"};
+  let current: OrbState = { status: "idle", progress: 0, task: "", action: "" };
 
-  function apply(a:S){
-    const m=META[a.st]||META.idle, c=ACCENT[a.st]||"#2563eb", p=cl(a.p);
-    ob.className="fb is-"+a.st;
-    // Progress ring with gradient ends
-    if(p>=100)ri.style.background=`conic-gradient(${c} 0deg 360deg)`;
-    else if(p<=0)ri.style.background="none";
-    else ri.style.background=`conic-gradient(from -90deg, ${c} ${(p/100)*360}deg, rgba(16,24,40,0.05) ${(p/100)*360}deg)`;
-    ri.style.mask="radial-gradient(circle, transparent 56%, #000 62%)";
-    ri.style.webkitMask="radial-gradient(circle, transparent 56%, #000 62%)";
-    // Icon only (no percentage)
-    ic.textContent=m[0];
-    // Popover
-    pt.textContent=m[1];
-    vt.textContent=a.task||"暂无任务";
-    va.textContent=a.act||a.msg||"等待下一步";
-    vs.textContent=fs(a.step,a.tot);
-    pf.style.width=p+"%";
-    pf.style.background=`linear-gradient(90deg, ${c}, ${c}88)`;
+  function apply(state: OrbState) {
+    const status = canonical(state.status);
+    const meta = META[status] || META.idle;
+    const progress = clamp(state.progress);
+    orb.className = `orb is-${meta.tone}`;
+    orb.style.setProperty("--accent", meta.accent);
+    icon.textContent = meta.icon;
+    title.textContent = meta.label;
+    task.textContent = state.task || "暂无任务";
+    action.textContent = state.action || "等待下一步";
+    step.textContent = stepText(state.step, state.total);
+    fill.style.width = `${progress}%`;
+    phaseMini.forEach((el, index) => el.classList.toggle("active", PHASE_INDEX[status] === index));
+    ring.style.background = progress <= 0
+      ? "none"
+      : `conic-gradient(from -90deg, ${meta.accent} ${progress * 3.6}deg, rgba(73,62,50,.08) ${progress * 3.6}deg)`;
+    ring.style.mask = "radial-gradient(circle, transparent 57%, #000 63%)";
+    ring.style.webkitMask = "radial-gradient(circle, transparent 57%, #000 63%)";
   }
 
-  function upd(n:any){
-    const raw=cs(n.currentPhase||n.state||n.status||cur.st);
-    cur={st:raw,
-      p:n.progress??n.progressPercent??(n.currentStep!=null&&n.maxSteps!=null?cl(((n.currentStep??1)/(n.maxSteps??50))*100):cur.p),
-      step:n.step??n.currentStep??cur.step,
-      tot:n.totalSteps??n.maxSteps??cur.tot,
-      task:n.currentTask??n.instruction??cur.task,
-      act:n.currentAction??n.currentActionText??n.currentPhase??cur.act,
-      msg:n.message??cur.msg};
-    apply(cur);
+  function update(next: any) {
+    const status = canonical(next.currentPhase || next.status || next.state || current.status);
+    current = {
+      status,
+      progress: next.progress ?? next.progressPercent ?? current.progress,
+      step: next.currentStep ?? next.step ?? current.step,
+      total: next.maxSteps ?? next.totalSteps ?? current.total,
+      task: next.instruction ?? next.currentTask ?? current.task,
+      action: next.actionText ?? next.currentActionText ?? next.currentAction ?? current.action,
+    };
+    apply(current);
   }
 
-  apply(cur);
-  (window as any).agentStatus={update:upd};
+  apply(current);
+  (window as any).agentStatus = { update };
 
-  document.getElementById("fr")!.addEventListener("click",async()=>{
-    try{await(window as any).electronAPI?.floating?.showMainWindow?.()}catch{}
+  orb.addEventListener("click", async () => {
+    try {
+      await (window as any).electronAPI?.floating?.showMainWindow?.();
+    } catch {}
   });
 
-  let cbs:(()=>void)[]=[];
-  const api=(window as any).electronAPI;
-  if(api?.floating?.onStatusChanged)cbs.push(api.floating.onStatusChanged((d:any)=>upd(d)));
-  if(api?.floating?.onStopTask)cbs.push(api.floating.onStopTask(async()=>{try{await api.agent?.stop()}catch{}}));
+  const cleanups: (() => void)[] = [];
+  const api = (window as any).electronAPI;
+  if (api?.floating?.onStatusChanged) cleanups.push(api.floating.onStatusChanged((data: any) => update(data)));
+  if (api?.floating?.onStopTask) cleanups.push(api.floating.onStopTask(async () => {
+    try {
+      await api.agent?.stop();
+    } catch {}
+  }));
 
-  window.addEventListener("beforeunload",()=>{
-    cbs.forEach(f=>f());
-    delete(window as any).agentStatus;
+  window.addEventListener("beforeunload", () => {
+    cleanups.forEach((dispose) => dispose());
+    delete (window as any).agentStatus;
   });
 }

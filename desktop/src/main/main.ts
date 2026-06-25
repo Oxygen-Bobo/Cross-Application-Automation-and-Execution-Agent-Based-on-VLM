@@ -15,6 +15,10 @@ function notifyHistoryUpdated() {
 
 let mainWindow: BrowserWindow | null = null;
 
+function isAlive(win: BrowserWindow | null): win is BrowserWindow {
+  return !!win && !win.isDestroyed();
+}
+
 function registerProtocols() {
   protocol.handle("agent-file", (request) => {
     const filePath = request.url.replace("agent-file://", "");
@@ -31,6 +35,10 @@ function createWindow() {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false, contextIsolation: true, nodeIntegration: false,
     },
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 
   mainWindow.on("ready-to-show", () => mainWindow?.show());
@@ -81,9 +89,13 @@ app.whenReady().then(() => {
     if (TERMINAL.includes(data?.status)) setTimeout(() => hideFloating(), 3000);
   });
   ipcMain.handle("floating:showMainWindow", () => {
-    mainWindow?.restore();
-    mainWindow?.show();
-    mainWindow?.focus();
+    if (isAlive(mainWindow)) {
+      mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
   });
   // stopTask is handled by floating renderer → calls agent:stop via preload
 
@@ -98,7 +110,7 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on("activate", () => { if (!isAlive(mainWindow)) createWindow(); });
 });
 
 app.on("window-all-closed", () => {

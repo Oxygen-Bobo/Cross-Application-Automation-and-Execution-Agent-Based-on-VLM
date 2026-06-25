@@ -1,19 +1,19 @@
 :root {
   /* ---- Backgrounds ---- */
-  --bg-app: #f5f6f8;
-  --bg-sidebar: #ffffff;
-  --bg-main: #f5f6f8;
-  --bg-card: #ffffff;
-  --bg-soft: #f0f2f5;
-  --bg-input: #ffffff;
-  --bg-hover: #f0f2f5;
-  --bg-active: #e4e8ee;
+  --bg-app: #f3efe8;
+  --bg-sidebar: #fffdf7;
+  --bg-main: #f3efe8;
+  --bg-card: #fffdf7;
+  --bg-soft: #eee5d8;
+  --bg-input: #fffdf7;
+  --bg-hover: #f2eadf;
+  --bg-active: #e8ddcf;
 
   /* ---- Text ---- */
-  --text-primary: #1a1d23;
-  --text-secondary: #5f6b7a;
-  --text-tertiary: #8f99a8;
-  --text-placeholder: #b0b8c4;
+  --text-primary: #241f1a;
+  --text-secondary: #6d6258;
+  --text-tertiary: #9b9288;
+  --text-placeholder: #aaa196;
 
   /* ---- Borders ---- */
   --border-light: rgba(16, 24, 40, 0.08);
@@ -27,17 +27,17 @@
   --shadow-floating: 0 16px 48px rgba(16, 24, 40, 0.14);
 
   /* ---- Brand + Semantic ---- */
-  --brand: #2563eb;
-  --brand-hover: #1d4ed8;
-  --brand-soft: #eef4ff;
-  --brand-ring: rgba(37, 99, 235, 0.15);
-  --success: #16a34a;
-  --success-soft: #eaf8ef;
-  --warning: #f59e0b;
-  --warning-soft: #fff8eb;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --danger-soft: #fef2f2;
+  --brand: #2f6b5c;
+  --brand-hover: #25584b;
+  --brand-soft: #e4f0ea;
+  --brand-ring: rgba(47, 107, 92, 0.16);
+  --success: #2f6b5c;
+  --success-soft: #e4f0ea;
+  --warning: #b9742d;
+  --warning-soft: #fff4df;
+  --danger: #a84227;
+  --danger-hover: #8f3520;
+  --danger-soft: #fff1ec;
 
   /* ---- Traffic lights ---- */
   --traffic-red: #ff5f57;
