@@ -7,6 +7,7 @@ guidance to the VLM so long workflows keep using reliable desktop patterns.
 
 from dataclasses import dataclass
 from typing import Iterable, List
+import re
 
 
 @dataclass(frozen=True)
@@ -43,9 +44,11 @@ WINDOWS_NAVIGATION_SKILL = AgentSkill(
     ),
     priority=90,
     guidance=(
-        "Use open_app when the app name is known.",
+        "When opening software, first reuse an active/open taskbar window if available; if no existing window is open, show the desktop first, then launch from desktop/start/search.",
+        "Use open_app when the app name is known; open_app will try to focus an existing window before launching another instance.",
         "Use Alt+Tab only when switching between already-open windows is clearly needed.",
         "If a window is hidden or minimized, restore/focus it before interacting with its content.",
+        "If a full-screen app hides the desktop or taskbar target, use show_desktop before switching apps.",
         "After launching an app, wait or observe until the main window is visible before continuing.",
     ),
 )
@@ -145,6 +148,8 @@ BROWSER_SKILL = AgentSkill(
     ),
     priority=78,
     guidance=(
+        "For web search or online information gathering, prefer Microsoft Edge unless the user names another browser.",
+        "Use search_web for search queries and open_url for known URLs to avoid slow address-bar click/type/enter loops.",
         "Use the address bar/search bar for navigation, not arbitrary page clicks.",
         "Wait/observe after navigation until the page content is visible.",
         "When extracting information, verify the page title/content matches the user's requested topic.",
@@ -181,6 +186,7 @@ OFFICE_SKILL = AgentSkill(
     priority=76,
     guidance=(
         "For Office/WPS, prefer menu/ribbon commands and common shortcuts such as Ctrl+S, Ctrl+O, Ctrl+F, Ctrl+P.",
+        "For requested DOCX reports, prefer create_docx_file over opening WPS/Word and typing manually.",
         "For generated reports, verify the file is saved/exported before using it in another app.",
         "When editing content, focus the document body/cell/slide area before typing or pasting.",
         "For spreadsheets, use cells, formula bar, and visible sheet tabs rather than guessing chart/table coordinates.",
@@ -199,6 +205,8 @@ REPORT_DELIVERY_SKILL = AgentSkill(
     priority=88,
     guidance=(
         "A report-delivery task is not complete until the report exists and has been sent to the specified destination.",
+        "For DOCX report delivery, create the DOCX through create_docx_file and send the resulting artifact path.",
+        "When a concise text/Markdown report is enough, use create_text_file to save it under AgentOutputs before sending.",
         "If the report file path is known, carry that path forward into the sending app/file picker.",
         "If the report was just generated, verify the save/export result before switching apps.",
         "After sending, observe the destination chat/email/app and confirm the report attachment or message is visible.",
@@ -223,16 +231,24 @@ SKILL_REGISTRY: tuple[AgentSkill, ...] = (
 
 def select_agent_skills(instruction: str, limit: int = 6) -> List[AgentSkill]:
     text = instruction.lower()
+    text_without_emails = re.sub(r"[\w.+-]+@[\w.-]+", " ", text)
     selected = [GENERAL_DESKTOP_SKILL]
 
     for skill in SKILL_REGISTRY:
         if skill is GENERAL_DESKTOP_SKILL:
             continue
-        if any(keyword.lower() in text for keyword in skill.keywords):
+        if any(_keyword_matches(keyword, text_without_emails) for keyword in skill.keywords):
             selected.append(skill)
 
     selected.sort(key=lambda skill: skill.priority, reverse=True)
     return selected[:limit]
+
+
+def _keyword_matches(keyword: str, text: str) -> bool:
+    key = keyword.lower()
+    if key.isascii() and key.replace("_", "").isalnum():
+        return re.search(rf"(?<![a-z0-9_]){re.escape(key)}(?![a-z0-9_])", text) is not None
+    return key in text
 
 
 def render_operation_guidance(instruction: str) -> str:
@@ -248,4 +264,3 @@ def render_operation_guidance(instruction: str) -> str:
 
 def selected_skill_ids(instruction: str) -> list[str]:
     return [skill.skill_id for skill in select_agent_skills(instruction)]
-

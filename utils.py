@@ -8,6 +8,8 @@ import textwrap
 import time
 import abc
 import base64
+import urllib.parse
+import webbrowser
 import numpy as np
 from io import BytesIO
 from openai import OpenAI
@@ -18,6 +20,7 @@ import pyperclip
 from PIL import Image, ImageDraw
 
 from agent_skills import render_operation_guidance
+from desktop_state import focus_existing_window
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +63,11 @@ class ComputerTools:
     def reset(self):
         """Minimize all windows and show the desktop."""
         pyautogui.hotkey("win", "d")
+
+    def show_desktop(self):
+        """Show the desktop so blocked/fullscreen apps no longer hide launch targets."""
+        pyautogui.hotkey("win", "d")
+        time.sleep(0.3)
 
     # -- keyboard actions -------------------------------------------------
 
@@ -123,10 +131,15 @@ class ComputerTools:
         Open an application by name using the OS search mechanism.
         Supports Windows, macOS, and Linux.
         """
+        app_name = _normalize_app_name(app_name)
+        if focus_existing_window(app_name):
+            return
+
         if app_name == "File Explorer":
             app_name = "文件资源管理器"
 
         if sys.platform == "win32":
+            self.show_desktop()
             pyautogui.hotkey("winleft", "s")
             time.sleep(wait)
             pyperclip.copy(app_name)
@@ -151,6 +164,27 @@ class ComputerTools:
             pyautogui.hotkey("ctrl", "v")
             time.sleep(0.3)
             pyautogui.press("enter")
+
+    def search_web(self, query, browser="Edge"):
+        """Open an Edge search result page directly to reduce UI round trips."""
+        query = str(query or "").strip()
+        if not query:
+            return
+        url = "https://www.bing.com/search?q=" + urllib.parse.quote_plus(query)
+        self.open_url(url, browser=browser)
+
+    def open_url(self, url, browser="Edge"):
+        """Open a URL directly, preferring Microsoft Edge on Windows."""
+        url = str(url or "").strip()
+        if not url:
+            return
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
+            url = "https://" + url
+        if sys.platform == "win32" and str(browser or "").lower() in {"edge", "microsoft edge", "浏览器"}:
+            os.startfile("microsoft-edge:" + url)
+        else:
+            webbrowser.open(url)
+        time.sleep(0.8)
 
     # -- mouse actions ----------------------------------------------------
 
@@ -532,9 +566,8 @@ SYSTEM_PROMPT = (
     '"description": "Use a mouse and keyboard to interact with a computer, '
     'and take screenshots.\\n'
     '* This is an interface to a desktop GUI. You do not have access to a '
-    'terminal or applications menu. You must click on desktop icons to start '
-    'applications. Prefer open_app for launching applications when the app '
-    'name is known.\\n'
+    'terminal. Prefer open_app for launching applications when the app '
+    'name is known, and reuse already-open windows when possible.\\n'
     '* Some applications may take time to start or process actions, so you '
     'may need to wait and take successive screenshots to see the results of '
     'your actions. E.g. if you click on Firefox and a window doesn\'t open, '
@@ -568,14 +601,29 @@ SYSTEM_PROMPT = (
     'status.\\n'
     '* `answer`: Answer a question.\\n'
     '* `interact`: Resolve the blocking window by interacting with the user.\\n'
+    '* `create_text_file`: Create a UTF-8 text or Markdown report file in the managed AgentOutputs folder.\\n'
+    '* `create_docx_file`: Create a DOCX report file in the managed AgentOutputs folder.\\n'
+    '* `search_web`: Search the web directly in Microsoft Edge. Use this for online information lookup.\\n'
+    '* `open_url`: Open a URL directly in Microsoft Edge.\\n'
+    '* `show_desktop`: Show the Windows desktop/minimize blocking windows before switching apps.\\n'
     '* `open_app`: Open an application by name using the operating system.", '
     '"enum": ["key", "type", "mouse_move", "left_click", "left_click_drag", '
     '"right_click", "middle_click", "double_click", "triple_click", "scroll", '
-    '"hscroll", "wait", "terminate", "answer", "interact", "open_app"], "type": "string"}, '
+    '"hscroll", "wait", "terminate", "answer", "interact", "create_text_file", '
+    '"create_docx_file", "search_web", "open_url", "show_desktop", "open_app"], "type": "string"}, '
     '"keys": {"description": "Required only by `action=key`.", '
     '"type": "array"}, '
-    '"text": {"description": "Required only by `action=type`, `action=answer` '
-    'and `action=interact`.", "type": "string"}, '
+    '"text": {"description": "Required only by `action=type`, `action=answer`, '
+    '`action=interact`, `action=create_text_file`, and `action=create_docx_file`.", "type": "string"}, '
+    '"filename": {"description": "Required only by `action=create_text_file` and '
+    '`action=create_docx_file`.", '
+    '"type": "string"}, '
+    '"title": {"description": "Optional title for `action=create_docx_file`.", '
+    '"type": "string"}, '
+    '"query": {"description": "Required only by `action=search_web`.", '
+    '"type": "string"}, '
+    '"url": {"description": "Required only by `action=open_url`.", '
+    '"type": "string"}, '
     '"app_name": {"description": "Required only by `action=open_app`.", '
     '"type": "string"}, '
     '"coordinate": {"description": "(x, y): normalized screen coordinates '
@@ -658,7 +706,26 @@ def get_operation_guidance(instruction):
     return "\n".join(guidance)
 
 
-def build_messages(image_path, instruction, history_output, model_name, history_n=2):
+def _normalize_app_name(app_name):
+    if not isinstance(app_name, str):
+        return app_name
+    cleaned = app_name.strip()
+    lowered = cleaned.lower()
+    if lowered in {"browser", "web browser", "浏览器", "网页浏览器", "search", "web search"}:
+        return "Edge"
+    if lowered in {"mail", "email", "邮箱", "邮件"}:
+        return "网易邮箱"
+    return cleaned
+
+
+def build_messages(
+    image_path,
+    instruction,
+    history_output,
+    model_name,
+    history_n=2,
+    runtime_context=None,
+):
     """
     Construct the multi-turn message list for the VLM.
 
@@ -686,11 +753,14 @@ def build_messages(image_path, instruction, history_output, model_name, history_
 
     previous_actions_str = "\n".join(previous_actions) if previous_actions else "None"
 
+    runtime_context_text = runtime_context.strip() if isinstance(runtime_context, str) else ""
+
     instruction_prompt = (
         "Please generate the next move according to the UI screenshot, "
         "instruction and previous actions.\n\n"
         f"Instruction: {instruction}\n\n"
         f"{get_operation_guidance(instruction)}\n\n"
+        f"{runtime_context_text}\n\n"
         f"Previous actions:\n{previous_actions_str}"
     )
 
@@ -795,7 +865,7 @@ def _repair_tool_call_block(block):
         return None
 
     args = {"action": action_match.group(1)}
-    for field in ("app_name", "text", "status"):
+    for field in ("app_name", "text", "status", "filename", "title", "query", "url", "browser"):
         match = re.search(rf'"{field}"\s*:\s*"([^"]*)"', block, re.DOTALL)
         if match:
             args[field] = match.group(1)

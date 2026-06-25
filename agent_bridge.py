@@ -188,7 +188,7 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Run the core agent (LangGraph graph, unchanged)
         # ------------------------------------------------------------------
-        core.run_agent(
+        result = core.run_agent(
             computer_tools,
             vllm,
             args.instruction,
@@ -196,7 +196,12 @@ def main() -> None:
             max_steps=args.max_steps,
         )
 
-        emit_json({"type": "run_finished", "status": "success", "runId": run_id})
+        emit_json({
+            "type": "run_finished",
+            "status": result.get("status", "failed"),
+            "runId": run_id,
+            "message": result.get("message", ""),
+        })
 
     except Exception as exc:
         err = str(exc)
