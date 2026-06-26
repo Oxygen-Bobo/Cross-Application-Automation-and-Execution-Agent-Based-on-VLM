@@ -1,6 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { getCurrentUserDataPathSync } from "./services/authService";
 
 export type RunStatus = "idle"|"running"|"capturing"|"thinking"|"acting"|"waiting"|"completed"|"failed"|"stopped";
 
@@ -29,20 +30,30 @@ function writeAtomic(f:string,d:unknown){const dir=path.dirname(f);ensureDir(dir
 export class HistoryStore{
   private root:string;private runsDir:string;private indexFile:string;
   constructor(){
-    this.root=path.join(app.getPath("userData"),"history");
+    this.root="";
+    this.runsDir="";
+    this.indexFile="";
+    this.refreshPaths();
+  }
+  refreshPaths(){
+    const currentUserDir = getCurrentUserDataPathSync();
+    this.root=currentUserDir ? path.join(currentUserDir,"history") : path.join(app.getPath("userData"),"history");
     this.runsDir=path.join(this.root,"runs");
     this.indexFile=path.join(this.root,"index.json");
     ensureDir(this.root);ensureDir(this.runsDir);
     if(!fs.existsSync(this.indexFile))writeAtomic(this.indexFile,[]);
   }
-  list():HistoryIndexItem[]{return this.normalizeIndex(readSafe<HistoryIndexItem[]>(this.indexFile,[]))}
+  private ensureFresh(){this.refreshPaths()}
+  list():HistoryIndexItem[]{this.ensureFresh();return this.normalizeIndex(readSafe<HistoryIndexItem[]>(this.indexFile,[]))}
   get(id:string):AgentRunDetail|null{
+    this.ensureFresh();
     if(!id)return null;
     const f=this.detailPath(id);
     const raw=readSafe<AgentRunDetail|null>(f,null);
     return raw?this.sanitize(raw):null;
   }
   create(detail:AgentRunDetail):HistoryIndexItem{
+    this.ensureFresh();
     const clean=this.sanitize({...detail,id:detail.id||crypto.randomUUID(),createdAt:detail.createdAt||n(),updatedAt:n()});
     writeAtomic(this.detailPath(clean.id),clean);
     const idx=this.indexFromDetail(clean);
@@ -50,6 +61,7 @@ export class HistoryStore{
     this.saveIndex(list);return idx;
   }
   update(id:string,patch:Partial<AgentRunDetail>):HistoryIndexItem|null{
+    this.ensureFresh();
     const old=this.get(id);if(!old)return null;
     const next=this.sanitize({...old,...patch,id,updatedAt:n()});
     writeAtomic(this.detailPath(id),next);
@@ -59,13 +71,14 @@ export class HistoryStore{
     this.saveIndex(list);return idx;
   }
   delete(id:string):boolean{
+    this.ensureFresh();
     if(!id)return false;
     this.saveIndex(this.list().filter(i=>i.id!==id));
     try{const f=this.detailPath(id);if(fs.existsSync(f))fs.unlinkSync(f)}catch{}
     return true;
   }
-  clear(){this.saveIndex([]);try{if(fs.existsSync(this.runsDir))for(const x of fs.readdirSync(this.runsDir))if(x.endsWith(".json"))fs.unlinkSync(path.join(this.runsDir,x))}catch{}}
-  repair():HistoryIndexItem[]{const r:HistoryIndexItem[]=[];for(const i of this.list()){const d=this.get(i.id);if(d)r.push(this.indexFromDetail(d))}this.saveIndex(r);return r}
+  clear(){this.ensureFresh();this.saveIndex([]);try{if(fs.existsSync(this.runsDir))for(const x of fs.readdirSync(this.runsDir))if(x.endsWith(".json"))fs.unlinkSync(path.join(this.runsDir,x))}catch{}}
+  repair():HistoryIndexItem[]{this.ensureFresh();const r:HistoryIndexItem[]=[];for(const i of this.list()){const d=this.get(i.id);if(d)r.push(this.indexFromDetail(d))}this.saveIndex(r);return r}
   private detailPath(id:string){return path.join(this.runsDir,`${id.replace(/[^a-zA-Z0-9_-]/g,"_")}.json`)}
   private saveIndex(l:HistoryIndexItem[]){writeAtomic(this.indexFile,this.normalizeIndex(l))}
   private normalizeIndex(l:HistoryIndexItem[]):HistoryIndexItem[]{

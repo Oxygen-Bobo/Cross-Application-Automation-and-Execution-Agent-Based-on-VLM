@@ -18,8 +18,44 @@ export interface ScheduledTaskDTO {
   lastRunAt?: string; lastRunStatus?: string; lastRunError?: string;
   createdAt: string; updatedAt: string; nextRunAt: string | null;
 }
+export type PlanType = "basic" | "pro";
+export interface PublicUserProfile {
+  id: string; email: string; nickname: string;
+  plan: PlanType; proExpireAt?: string | null;
+  createdAt: string; updatedAt: string; lastLoginAt?: string;
+}
+export interface AuthSession {
+  userId: string; loginAt: string; rememberMe: boolean;
+}
+export type PaymentPlan = "pro_monthly" | "pro_yearly";
+export type PaymentChannel = "wechat" | "alipay";
+export type PaymentStatus = "pending" | "paid_pending_review" | "activated" | "cancelled";
+export interface PaymentOrder {
+  id: string; userId: string; plan: PaymentPlan; amount: number;
+  channel: PaymentChannel; status: PaymentStatus; createdAt: string; updatedAt: string;
+}
 
 const electronAPI = {
+  auth: {
+    register: (payload: { nickname: string; email: string; password: string; rememberMe?: boolean }): Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }> => ipcRenderer.invoke("auth:register", payload),
+    login: (payload: { email: string; password: string; rememberMe?: boolean }): Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }> => ipcRenderer.invoke("auth:login", payload),
+    logout: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("auth:logout"),
+    getCurrentUser: (): Promise<PublicUserProfile | null> => ipcRenderer.invoke("auth:getCurrentUser"),
+    getSession: (): Promise<{ session: AuthSession | null; user: PublicUserProfile | null }> => ipcRenderer.invoke("auth:getSession"),
+    updateProfile: (payload: { nickname: string }): Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }> => ipcRenderer.invoke("auth:updateProfile", payload),
+    onChanged: (cb: () => void) => { const h = () => cb(); ipcRenderer.on("auth:changed", h); return () => ipcRenderer.removeListener("auth:changed", h); },
+  },
+  payment: {
+    createOrder: (payload: { plan: PaymentPlan; channel: PaymentChannel }): Promise<{ ok: boolean; order?: PaymentOrder; error?: string }> => ipcRenderer.invoke("payment:createOrder", payload),
+    markPaid: (orderId: string): Promise<{ ok: boolean; order?: PaymentOrder; error?: string }> => ipcRenderer.invoke("payment:markPaid", orderId),
+    cancelOrder: (orderId: string): Promise<{ ok: boolean; order?: PaymentOrder; error?: string }> => ipcRenderer.invoke("payment:cancelOrder", orderId),
+    activateProDev: (orderId: string): Promise<{ ok: boolean; order?: PaymentOrder; user?: PublicUserProfile; error?: string }> => ipcRenderer.invoke("payment:activateProDev", orderId),
+    getOrders: (): Promise<PaymentOrder[]> => ipcRenderer.invoke("payment:getOrders"),
+  },
+  userData: {
+    getCurrentUserDataPath: (): Promise<string | null> => ipcRenderer.invoke("userData:getCurrentUserDataPath"),
+    switchUser: (userId: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("userData:switchUser", userId),
+  },
   config: {
     get: (): Promise<ApiConfig> => ipcRenderer.invoke("config:get"),
     save: (cfg: { baseUrl: string; modelName: string; maxRetry: number; timeout: number; apiKey?: string }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("config:save", cfg),

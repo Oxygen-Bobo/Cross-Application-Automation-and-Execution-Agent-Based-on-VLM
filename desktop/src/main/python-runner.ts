@@ -3,6 +3,7 @@ import { ipcMain, BrowserWindow, shell, app } from "electron";
 import { join } from "path";
 import { homedir } from "os";
 import { existsSync, mkdirSync } from "fs";
+import { getCurrentUserDataPathSync } from "./services/authService";
 
 let currentProcess: ChildProcess | null = null;
 let currentTaskId: string | null = null;
@@ -177,6 +178,12 @@ export function registerPythonHandlers(ipc: typeof ipcMain) {
   });
 
   ipc.handle("agent:getDefaultOutputDir", async () => {
+    const currentUserDir = getCurrentUserDataPathSync();
+    if (currentUserDir) {
+      const outputDir = join(currentUserDir, "runs", "outputs");
+      if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
+      return outputDir;
+    }
     const home = homedir();
     const desktop = join(home, "Desktop", "anno");
     if (!existsSync(desktop)) {

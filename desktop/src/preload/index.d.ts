@@ -35,6 +35,36 @@ export interface ScheduledTaskDTO {
   nextRunAt: string | null;
 }
 
+export type PlanType = "basic" | "pro";
+export interface PublicUserProfile {
+  id: string;
+  email: string;
+  nickname: string;
+  plan: PlanType;
+  proExpireAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+export interface AuthSession {
+  userId: string;
+  loginAt: string;
+  rememberMe: boolean;
+}
+export type PaymentPlan = "pro_monthly" | "pro_yearly";
+export type PaymentChannel = "wechat" | "alipay";
+export type PaymentStatus = "pending" | "paid_pending_review" | "activated" | "cancelled";
+export interface PaymentOrder {
+  id: string;
+  userId: string;
+  plan: PaymentPlan;
+  amount: number;
+  channel: PaymentChannel;
+  status: PaymentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FloatingUpdate {
   status: string;
   currentStep?: number;
@@ -47,6 +77,35 @@ export interface FloatingUpdate {
 }
 
 export interface ElectronAPI {
+  auth: {
+    register: (payload: {
+      nickname: string;
+      email: string;
+      password: string;
+      rememberMe?: boolean;
+    }) => Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }>;
+    login: (payload: {
+      email: string;
+      password: string;
+      rememberMe?: boolean;
+    }) => Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }>;
+    logout: () => Promise<{ ok: boolean; error?: string }>;
+    getCurrentUser: () => Promise<PublicUserProfile | null>;
+    getSession: () => Promise<{ session: AuthSession | null; user: PublicUserProfile | null }>;
+    updateProfile: (payload: { nickname: string }) => Promise<{ ok: boolean; user?: PublicUserProfile; error?: string }>;
+    onChanged: (cb: () => void) => () => void;
+  };
+  payment: {
+    createOrder: (payload: { plan: PaymentPlan; channel: PaymentChannel }) => Promise<{ ok: boolean; order?: PaymentOrder; error?: string }>;
+    markPaid: (orderId: string) => Promise<{ ok: boolean; order?: PaymentOrder; error?: string }>;
+    cancelOrder: (orderId: string) => Promise<{ ok: boolean; order?: PaymentOrder; error?: string }>;
+    activateProDev: (orderId: string) => Promise<{ ok: boolean; order?: PaymentOrder; user?: PublicUserProfile; error?: string }>;
+    getOrders: () => Promise<PaymentOrder[]>;
+  };
+  userData: {
+    getCurrentUserDataPath: () => Promise<string | null>;
+    switchUser: (userId: string) => Promise<{ ok: boolean; error?: string }>;
+  };
   config: {
     get: () => Promise<ApiConfig>;
     save: (cfg: {

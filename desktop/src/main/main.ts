@@ -13,13 +13,24 @@ import {
   endFloatingDrag,
 } from "./floating-ball";
 import { HistoryStore } from "./historyStore";
-import { initScheduler, stopScheduler } from "./scheduler";
+import { initScheduler, reloadSchedulerForCurrentUser, stopScheduler } from "./scheduler";
+import { registerAuthHandlers } from "./services/authService";
+import { registerPaymentHandlers } from "./services/paymentService";
 
 const historyStore = new HistoryStore();
 
 function notifyHistoryUpdated() {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("history:updated");
+  }
+}
+
+function notifyAuthChanged() {
+  historyStore.refreshPaths();
+  reloadSchedulerForCurrentUser();
+  notifyHistoryUpdated();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send("auth:changed");
   }
 }
 
@@ -70,6 +81,8 @@ function createWindow() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   registerProtocols();
+  registerAuthHandlers(ipcMain, notifyAuthChanged);
+  registerPaymentHandlers(ipcMain);
   registerConfigHandlers(ipcMain);
   registerPythonHandlers(ipcMain);
   initScheduler(ipcMain);

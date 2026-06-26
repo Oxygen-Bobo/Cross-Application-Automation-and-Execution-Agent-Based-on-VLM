@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { getConfig, getDecryptedApiKey } from "./config-store";
 import { isAgentRunning, startAgentProcess, type AgentFinishInfo } from "./python-runner";
+import { getCurrentUserDataPathSync } from "./services/authService";
 
 export type ScheduleRepeat = "once" | "daily" | "weekday" | "weekly";
 export type ScheduledTaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -36,14 +37,20 @@ let tasks: ScheduledTask[] = [];
 let timer: ReturnType<typeof setInterval> | null = null;
 
 function getStorePath() {
-  const userData = app.getPath("userData");
-  if (!existsSync(userData)) mkdirSync(userData, { recursive: true });
-  return join(userData, STORE_FILE);
+  const userDir = getCurrentUserDataPathSync();
+  if (!userDir) return null;
+  const configDir = join(userDir, "config");
+  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+  return join(configDir, STORE_FILE);
 }
 
 function loadStore() {
   try {
     const file = getStorePath();
+    if (!file) {
+      tasks = [];
+      return;
+    }
     if (!existsSync(file)) {
       tasks = [];
       return;
@@ -57,7 +64,11 @@ function loadStore() {
 }
 
 function saveStore() {
-  writeFileSync(getStorePath(), JSON.stringify({ tasks }, null, 2), "utf-8");
+  const file = getStorePath();
+  if (!file) return;
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ tasks }, null, 2), "utf-8");
+  renameSync(tmp, file);
 }
 
 function sendToRenderer(channel: string, data: unknown) {
@@ -174,7 +185,7 @@ async function runTask(task: ScheduledTask) {
 
   const config = getConfig();
   const runAt = new Date();
-  const outputRoot = join(app.getPath("home"), "Desktop", "anno");
+  const outputRoot = join(getCurrentUserDataPathSync() || app.getPath("home"), "runs", "outputs");
   if (!existsSync(outputRoot)) mkdirSync(outputRoot, { recursive: true });
   const outputDir = join(outputRoot, `scheduled_${task.id}_${runAt.getTime()}`);
 
@@ -309,6 +320,12 @@ export function stopScheduler() {
     clearInterval(timer);
     timer = null;
   }
+}
+
+export function reloadSchedulerForCurrentUser() {
+  loadStore();
+  checkDueTasks();
+  sendToRenderer("scheduler:taskFinished", { type: "reloaded" });
 }
 
 export function initScheduler(ipc: typeof ipcMain) {

@@ -1,6 +1,7 @@
 import { safeStorage, ipcMain, app } from "electron";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
+import { getCurrentUserDataPathSync } from "./services/authService";
 
 export interface StoredConfig {
   baseUrl: string;
@@ -20,10 +21,14 @@ const DEFAULTS: StoredConfig = {
 };
 
 function getConfigPath(): string {
-  const userData = app.getPath("userData");
-  if (!existsSync(userData)) {
-    mkdirSync(userData, { recursive: true });
+  const currentUserDir = getCurrentUserDataPathSync();
+  if (currentUserDir) {
+    const configDir = join(currentUserDir, "config");
+    if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+    return join(configDir, "agent-config.json");
   }
+  const userData = app.getPath("userData");
+  if (!existsSync(userData)) mkdirSync(userData, { recursive: true });
   return join(userData, "agent-config.json");
 }
 
@@ -54,7 +59,10 @@ export function getDecryptedApiKey(): string | null {
 }
 
 function saveConfig(cfg: StoredConfig): void {
-  writeFileSync(getConfigPath(), JSON.stringify(cfg, null, 2), "utf-8");
+  const file = getConfigPath();
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
+  renameSync(tmp, file);
 }
 
 function maskKey(key: string): string {
