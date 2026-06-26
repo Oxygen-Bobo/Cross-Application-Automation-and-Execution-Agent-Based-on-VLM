@@ -25,7 +25,7 @@ from utils import (
 from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import StateGraph, START, END
 
-API_KEY = "sk-ws-H.RPEIMEH.dBrN.MEQCIFzV2Scc_QsDTvs1a2WVrw2t1TeMMNfqH5qi6Gqof5arAiAzllm-aN8hRipTNj6E8MLreHHil0ThualYvWngnH4qog"
+API_KEY = ""
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen3-vl-plus"
 MAX_STEPS = 50
