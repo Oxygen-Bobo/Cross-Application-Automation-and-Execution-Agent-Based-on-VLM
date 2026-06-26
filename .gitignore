@@ -7,7 +7,13 @@ __pycache__/
 desktop/node_modules/
 desktop/out/
 desktop/dist/
+desktop/release/
+desktop/resources/agent/*
+!desktop/resources/agent/.gitkeep
 desktop/*.log
+
+# Build artifacts
+build/
 
 # IDE
 .vscode/

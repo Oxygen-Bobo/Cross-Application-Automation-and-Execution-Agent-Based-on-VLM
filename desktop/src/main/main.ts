@@ -1,5 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, protocol, net, Menu } from "electron";
+import { existsSync } from "fs";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { registerConfigHandlers } from "./config-store";
 import { registerPythonHandlers } from "./python-runner";
 import {
@@ -18,6 +20,13 @@ import { registerAuthHandlers } from "./services/authService";
 import { registerPaymentHandlers } from "./services/paymentService";
 
 const historyStore = new HistoryStore();
+
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+}
 
 function notifyHistoryUpdated() {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -42,8 +51,11 @@ function isAlive(win: BrowserWindow | null): win is BrowserWindow {
 
 function registerProtocols() {
   protocol.handle("agent-file", (request) => {
-    const filePath = request.url.replace("agent-file://", "");
-    return net.fetch(`file://${filePath}`);
+    const filePath = decodeURIComponent(request.url.replace("agent-file://", ""));
+    if (!existsSync(filePath)) {
+      return new Response("", { status: 404 });
+    }
+    return net.fetch(pathToFileURL(filePath).toString());
   });
 }
 
@@ -147,6 +159,14 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on("activate", () => { if (!isAlive(mainWindow)) createWindow(); });
+});
+
+app.on("second-instance", () => {
+  if (isAlive(mainWindow)) {
+    mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
 });
 
 app.on("window-all-closed", () => {

@@ -1,6 +1,8 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import type { PaymentChannel, PaymentOrder, PaymentPlan, PublicUserProfile } from "../../../preload/index";
+import alipayQr from "../../assets/payment/alipay-qr.png";
+import wechatQr from "../../assets/payment/wechat-qr.png";
 import "../../styles/pro.css";
 
 const basicFeatures = ["基础桌面自动化", "基础任务历史", "手动配置 API Key", "本地运行"];
@@ -128,6 +130,8 @@ export function PaymentPage(props: { user: PublicUserProfile; onUserChanged: (us
   const [channel, setChannel] = createSignal<PaymentChannel>("wechat");
   const [toast, setToast] = createSignal("");
   const [error, setError] = createSignal("");
+  const qrImage = createMemo(() => (channel() === "wechat" ? wechatQr : alipayQr));
+  const qrAlt = createMemo(() => (channel() === "wechat" ? "微信收款二维码" : "支付宝收款二维码"));
 
   async function refresh() {
     const next = await window.electronAPI.payment.getOrders();
@@ -182,7 +186,7 @@ export function PaymentPage(props: { user: PublicUserProfile; onUserChanged: (us
                   <button classList={{ active: channel() === "alipay" }} onClick={() => setChannel("alipay")}>支付宝</button>
                 </div>
                 <div class={`qr-placeholder ${channel()}`}>
-                  <div class="qr-inner">QR</div>
+                  <img class="qr-image" src={qrImage()} alt={qrAlt()} />
                 </div>
                 <p class="qr-note">请使用微信或支付宝扫码完成支付。收款二维码可在应用资源配置中更新。</p>
               </article>

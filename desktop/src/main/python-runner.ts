@@ -11,12 +11,41 @@ let currentFinalStatus: string | null = null;
 let currentFinalError: string | null = null;
 
 function getBridgePath(): string {
-  // agent_bridge.py is one directory above the desktop/ folder
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "agent", process.platform === "win32" ? "agent_bridge.exe" : "agent_bridge");
+  }
   return join(__dirname, "..", "..", "..", "agent_bridge.py");
 }
 
 function getPythonCommand(): string {
   return process.platform === "win32" ? "python" : "python3";
+}
+
+function buildAgentCommand(params: AgentProcessParams): { command: string; args: string[]; error?: string } {
+  const bridgePath = getBridgePath();
+  if (!existsSync(bridgePath)) {
+    return {
+      command: "",
+      args: [],
+      error: app.isPackaged
+        ? `Packaged agent executable not found: ${bridgePath}`
+        : `Agent bridge script not found: ${bridgePath}`,
+    };
+  }
+
+  const runtimeArgs = [
+    "--instruction", params.instruction,
+    "--base-url", params.baseUrl,
+    "--model-name", params.modelName,
+    "--max-steps", String(params.maxSteps),
+    "--output-dir", params.outputDir,
+  ];
+
+  if (app.isPackaged) {
+    return { command: bridgePath, args: runtimeArgs };
+  }
+
+  return { command: getPythonCommand(), args: [bridgePath, ...runtimeArgs] };
 }
 
 function sendToRenderer(evt: string, data: unknown) {
@@ -65,17 +94,10 @@ export function startAgentProcess(
   currentFinalStatus = null;
   currentFinalError = null;
 
-  const bridgePath = getBridgePath();
-  const python = getPythonCommand();
-
-  const args = [
-    bridgePath,
-    "--instruction", params.instruction,
-    "--base-url", params.baseUrl,
-    "--model-name", params.modelName,
-    "--max-steps", String(params.maxSteps),
-    "--output-dir", params.outputDir,
-  ];
+  const agentCommand = buildAgentCommand(params);
+  if (agentCommand.error) {
+    return { ok: false, error: agentCommand.error };
+  }
 
   const env = {
     ...process.env,
@@ -84,7 +106,7 @@ export function startAgentProcess(
     PYTHONUTF8: "1",
   };
 
-  currentProcess = spawn(python, args, {
+  currentProcess = spawn(agentCommand.command, agentCommand.args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     env,

@@ -221,6 +221,8 @@
     #fff;
   background-size: 18px 18px;
   border: 1px solid var(--border-default);
+  overflow: hidden;
+  padding: 12px;
 }
 
 .qr-placeholder.wechat {
@@ -231,17 +233,13 @@
   box-shadow: inset 0 0 0 10px rgba(37, 99, 235, 0.08);
 }
 
-.qr-inner {
-  width: 86px;
-  height: 86px;
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-primary);
-  background: var(--bg-soft);
-  font-weight: 800;
-  letter-spacing: 0;
+.qr-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #fff;
 }
 
 .qr-note {

@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "agent:build": "powershell -ExecutionPolicy Bypass -File ../scripts/build-agent.ps1",
+    "dist": "powershell -ExecutionPolicy Bypass -File ../scripts/package-windows.ps1",
+    "dist:dir": "npm run agent:build && npm run build && electron-builder --dir"
   },
   "devDependencies": {
     "@solidjs/router": "^0.13.6",
     "autoprefixer": "^10.4.20",
     "electron": "^32.3.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.47",
     "solid-icons": "^1.1.0",
@@ -27,5 +31,38 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0"
+  },
+  "build": {
+    "appId": "com.desktop.agent",
+    "productName": "Desktop Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/agent",
+        "to": "agent",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Desktop Agent"
+    }
   }
 }
