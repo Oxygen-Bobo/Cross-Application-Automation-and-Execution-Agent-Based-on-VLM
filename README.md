@@ -18,7 +18,9 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#桌面端功能">桌面端功能</a> ·
   <a href="#系统架构">系统架构</a> ·
-  <a href="#打包发布">打包发布</a>
+  <a href="#打包发布">打包发布</a> ·
+  <a href="docs/DESIGN.md">设计文档</a> ·
+  <a href="docs/USER_GUIDE.md">用户指南</a>
 </p>
 
 ---
