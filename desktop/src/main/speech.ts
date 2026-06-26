@@ -17,9 +17,9 @@ type SpeechResult = {
 
 // 科大讯飞语音听写 API 配置位置：
 // 在这里填写控制台里的 AppID、APIKey、APISecret。填写后需要重启桌面应用。
-const XFYUN_APP_ID = "3db19f12";
-const XFYUN_API_KEY = "eb09c50bfdcdbb335cbbb3e8ceb53a05";
-const XFYUN_API_SECRET = "NmYwNzc3MTBiZjc5NTY4YmRkNDM2ZTk0";
+const XFYUN_APP_ID = "";
+const XFYUN_API_KEY = "";
+const XFYUN_API_SECRET = "";
 
 function getXfyunConfig() {
   const appId = XFYUN_APP_ID || process.env.XFYUN_APP_ID || process.env.IFLYTEK_APP_ID || "";
