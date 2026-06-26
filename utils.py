@@ -301,16 +301,28 @@ class StepPopup:
             x, y = pos
         root.geometry(f"{width}x{height}+{x}+{y}")
 
+        is_completion = str(title).strip() in {"任务完成", "任务已结束"}
+        bg = "#f7f3ed" if is_completion else "#1f1f1f"
+        card_bg = "#fffdf7" if is_completion else "#1f1f1f"
+        text_bg = "#fffaf2" if is_completion else "#262626"
+        text_fg = "#473f38" if is_completion else "#e8e8e8"
+        title_fg = "#241f1a" if is_completion else "#ffffff"
+        muted_fg = "#756b61" if is_completion else "#bbbbbb"
+        accent = "#2f6b5c" if is_completion else "#bbbbbb"
+
         # Main container
-        frm = tk.Frame(root, bg="#1f1f1f")
-        frm.pack(fill="both", expand=True, padx=10, pady=10)
+        frm = tk.Frame(root, bg=bg)
+        frm.pack(fill="both", expand=True, padx=12, pady=12)
+
+        card = tk.Frame(frm, bg=card_bg, highlightthickness=1, highlightbackground="#e1d7ca")
+        card.pack(fill="both", expand=True)
 
         # Title label
         lbl_title = tk.Label(
-            frm, text=title, bg="#1f1f1f", fg="#ffffff",
-            font=("Segoe UI", 12, "bold"), anchor="w",
+            card, text=title, bg=card_bg, fg=title_fg,
+            font=("Microsoft YaHei UI", 15, "bold"), anchor="w",
         )
-        lbl_title.pack(fill="x", pady=(0, 6))
+        lbl_title.pack(fill="x", padx=18, pady=(16, 8))
 
         # Compute available heights for image and text areas
         content_h = height - 90
@@ -318,18 +330,19 @@ class StepPopup:
         text_h = max(60, content_h - image_h)
 
         # Image area (fixed height, scaled to fit)
-        image_frame = tk.Frame(frm, bg="#1f1f1f", height=image_h)
-        image_frame.pack(fill="x")
+        image_frame = tk.Frame(card, bg=card_bg, height=image_h)
+        if image_ratio > 0:
+            image_frame.pack(fill="x", padx=18)
         image_frame.pack_propagate(False)
 
-        img_label = tk.Label(image_frame, bg="#1f1f1f")
+        img_label = tk.Label(image_frame, bg=card_bg)
         img_label.pack(fill="both", expand=True)
 
         photo_ref = {"img": None}  # prevent garbage collection
 
         def render_image():
             if not image_path:
-                img_label.config(text="(No image)", fg="#bbbbbb")
+                img_label.config(text="", fg=muted_fg)
                 return
             try:
                 with Image.open(image_path) as im_src:
@@ -345,20 +358,23 @@ class StepPopup:
                 img_label.config(image=photo)
                 photo_ref["img"] = photo
             except Exception as e:
-                img_label.config(text=f"Image load failed: {e}", fg="#ff6666")
+                img_label.config(text=f"Image load failed: {e}", fg="#a84227")
 
         render_image()
 
         # Text area (scrollable)
-        text_frame = tk.Frame(frm, bg="#1f1f1f", height=text_h)
-        text_frame.pack(fill="both", expand=True, pady=(6, 0))
+        text_frame = tk.Frame(card, bg=card_bg, height=text_h)
+        text_frame.pack(fill="both", expand=True, padx=18, pady=(6, 0))
         text_frame.pack_propagate(False)
 
         scrollbar = tk.Scrollbar(text_frame)
         scrollbar.pack(side="right", fill="y")
         txt = tk.Text(
-            text_frame, wrap="word", bg="#262626", fg="#e8e8e8",
-            insertbackground="#e8e8e8", relief="flat",
+            text_frame, wrap="word", bg=text_bg, fg=text_fg,
+            insertbackground=text_fg, relief="flat",
+            font=("Microsoft YaHei UI", 11),
+            padx=14,
+            pady=12,
         )
         txt.pack(side="left", fill="both", expand=True)
         txt.config(yscrollcommand=scrollbar.set)
@@ -368,8 +384,8 @@ class StepPopup:
         txt.config(state="disabled")
 
         # Bottom bar: countdown + close button
-        bottom = tk.Frame(frm, bg="#1f1f1f")
-        bottom.pack(fill="x", pady=(6, 0))
+        bottom = tk.Frame(card, bg=card_bg)
+        bottom.pack(fill="x", padx=18, pady=(10, 16))
         countdown_var = tk.StringVar()
 
         def close():
@@ -387,11 +403,23 @@ class StepPopup:
 
         lbl_count = tk.Label(
             bottom, textvariable=countdown_var,
-            bg="#1f1f1f", fg="#bbbbbb", font=("Segoe UI", 10),
+            bg=card_bg, fg=muted_fg, font=("Microsoft YaHei UI", 10),
         )
         lbl_count.pack(side="left")
 
-        btn = tk.Button(bottom, text="Close", command=close)
+        btn = tk.Button(
+            bottom,
+            text="关闭",
+            command=close,
+            bg=accent,
+            fg="#ffffff",
+            activebackground="#285c50",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=18,
+            pady=6,
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
         btn.pack(side="right")
 
         remaining = [timeout_sec]
@@ -402,12 +430,12 @@ class StepPopup:
                 close()
             else:
                 countdown_var.set(
-                    f"Auto-close in {remaining[0]}s (Esc/Enter to dismiss)"
+                    f"{remaining[0]} 秒后自动关闭（Esc / Enter 关闭）"
                 )
                 root.after(1000, tick)
 
         countdown_var.set(
-            f"Auto-close in {timeout_sec}s (Esc/Enter to dismiss)"
+            f"{timeout_sec} 秒后自动关闭（Esc / Enter 关闭）"
         )
         root.after(1000, tick)
 

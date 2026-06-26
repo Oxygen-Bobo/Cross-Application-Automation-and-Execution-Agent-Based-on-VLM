@@ -18,6 +18,7 @@ import { HistoryStore } from "./historyStore";
 import { initScheduler, reloadSchedulerForCurrentUser, stopScheduler } from "./scheduler";
 import { registerAuthHandlers } from "./services/authService";
 import { registerPaymentHandlers } from "./services/paymentService";
+import { registerSpeechHandlers } from "./speech";
 
 const historyStore = new HistoryStore();
 
@@ -97,6 +98,7 @@ app.whenReady().then(() => {
   registerPaymentHandlers(ipcMain);
   registerConfigHandlers(ipcMain);
   registerPythonHandlers(ipcMain);
+  registerSpeechHandlers(ipcMain);
   initScheduler(ipcMain);
 
   // Floating window IPC

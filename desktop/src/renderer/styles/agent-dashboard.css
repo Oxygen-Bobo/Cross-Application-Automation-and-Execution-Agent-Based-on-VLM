@@ -160,6 +160,50 @@
   padding: 12px 16px 16px 22px;
 }
 
+.composer-action-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.voice-input-btn {
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: #fff;
+  font-size: var(--text-base);
+  font-weight: 500;
+  padding: 0 24px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.voice-input-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  background: var(--brand-hover);
+  box-shadow: 0 10px 22px rgba(47, 107, 92, 0.14);
+}
+
+.voice-input-btn.recording,
+.composer-voice-btn.recording {
+  background: #a84227;
+  color: #fff;
+  animation: voicePulse 1.1s ease-in-out infinite;
+}
+
+.voice-input-btn.busy,
+.composer-voice-btn.busy {
+  cursor: wait;
+  opacity: 0.76;
+}
+
 .safety-note {
   display: inline-flex;
   align-items: center;
@@ -753,7 +797,7 @@
 .composer-textarea {
   width: 100%;
   min-height: 108px;
-  padding: 20px 78px 44px 22px;
+  padding: 20px 142px 44px 22px;
   resize: none;
   border: 0;
   outline: 0;
@@ -763,39 +807,69 @@
   line-height: 1.65;
 }
 
+.agent-shell .composer-voice-btn,
+.agent-shell .composer-send-btn {
+  position: absolute;
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 44px;
+  max-height: 44px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.agent-shell .composer-voice-btn {
+  right: 72px;
+  font-size: 18px;
+}
+
+.agent-shell .composer-send-btn {
+  right: 16px;
+  font-size: 23px;
+}
+
+.agent-shell .composer-voice-btn svg,
+.agent-shell .composer-send-btn svg,
+.agent-shell .composer-voice-btn span,
+.agent-shell .composer-send-btn span {
+  display: block;
+  line-height: 1;
+}
+
+.agent-shell .composer-voice-btn:disabled,
+.agent-shell .composer-send-btn:disabled {
+  background: var(--brand);
+  color: #fff;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.agent-shell .composer-voice-btn:not(:disabled):hover,
+.agent-shell .composer-send-btn:not(:disabled):hover {
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 10px 22px rgba(47, 107, 92, 0.12);
+}
+
 .composer-textarea::placeholder {
   color: #9b9288;
 }
 
-.composer-send-btn {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: #2f6b5c;
-  color: #fff;
-  font-size: 23px;
-  cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease;
-}
-
-.composer-send-btn.running {
+.agent-shell .composer-send-btn.running {
   background: #a84227;
   font-size: 16px;
-}
-
-.composer-send-btn:disabled {
-  background: #d4cabf;
-  cursor: not-allowed;
-}
-
-.composer-send-btn:not(:disabled):hover {
-  transform: translateY(-1px) scale(1.04);
 }
 
 .composer-hint {
@@ -817,6 +891,11 @@
 @keyframes phasePulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(47, 107, 92, 0.16); }
   50% { box-shadow: 0 0 0 6px rgba(47, 107, 92, 0); }
+}
+
+@keyframes voicePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(168, 66, 39, 0.18); }
+  50% { box-shadow: 0 0 0 6px rgba(168, 66, 39, 0); }
 }
 
 @media (max-width: 860px) {

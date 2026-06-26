@@ -78,6 +78,93 @@ function savePrompts(prompts: PromptCard[]) {
   localStorage.setItem(PROMPT_KEY, JSON.stringify(prompts));
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function createVoiceInput(setText: (updater: (value: string) => string) => void) {
+  const [recording, setRecording] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  let recorder: MediaRecorder | null = null;
+  let chunks: Blob[] = [];
+  let activeStream: MediaStream | null = null;
+
+  function cleanup() {
+    activeStream?.getTracks().forEach((track) => track.stop());
+    activeStream = null;
+    recorder = null;
+    chunks = [];
+    setRecording(false);
+    setBusy(false);
+  }
+
+  async function stopRecording() {
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+  }
+
+  async function toggle() {
+    if (busy()) return;
+    if (recording()) {
+      await stopRecording();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      activeStream = stream;
+      chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = async () => {
+        setRecording(false);
+        setBusy(true);
+        stream.getTracks().forEach((track) => track.stop());
+        try {
+          const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
+          const audioBase64 = await blobToBase64(blob);
+          const result = await window.electronAPI.speech.transcribe({ audioBase64, mimeType: blob.type });
+          if (!result.ok) {
+            alert(result.error || "语音识别失败");
+            return;
+          }
+          const recognized = (result.text || "").trim();
+          if (recognized) {
+            setText((value) => `${value}${value.trim() ? "\n" : ""}${recognized}`);
+          }
+        } catch (error: any) {
+          alert(error?.message || "语音识别失败");
+        } finally {
+          cleanup();
+        }
+      };
+      recorder.start();
+      setRecording(true);
+    } catch (error: any) {
+      cleanup();
+      alert(error?.message || "无法启动麦克风，请检查系统权限。");
+    }
+  }
+
+  return { recording, busy, toggle, cleanup };
+}
+
+function MicIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3Z" stroke="currentColor" stroke-width="2" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  );
+}
+
 export default function ChatView() {
   const [activeRun, setActiveRun] = createSignal<AgentRun | null>(null);
   const [selectedRun, setSelectedRun] = createSignal<AgentRun | null>(null);
@@ -537,6 +624,8 @@ function Home(props: {
 }) {
   const [text, setText] = createSignal("");
   const [editingId, setEditingId] = createSignal<string | null>(null);
+  const voice = createVoiceInput((updater) => setText((value) => updater(value)));
+  onCleanup(() => voice.cleanup());
 
   function submit() {
     const value = text().trim();
@@ -586,9 +675,21 @@ function Home(props: {
             <span>!</span>
             Agent 会控制鼠标和键盘。任务执行时可随时点击停止任务。
           </div>
-          <button data-component="button" data-variant="primary" data-size="lg" onClick={submit} disabled={!text().trim()}>
-            开始执行
-          </button>
+          <div class="composer-action-buttons">
+            <button
+              class="voice-input-btn"
+              classList={{ recording: voice.recording(), busy: voice.busy() }}
+              onClick={voice.toggle}
+              disabled={voice.busy()}
+              title={voice.recording() ? "停止录音并识别" : "语音输入"}
+            >
+              <MicIcon />
+              <span>{voice.busy() ? "识别中" : voice.recording() ? "停止" : "语音输入"}</span>
+            </button>
+            <button data-component="button" data-variant="primary" data-size="lg" onClick={submit} disabled={!text().trim()}>
+              开始执行
+            </button>
+          </div>
         </div>
       </section>
 
@@ -694,7 +795,9 @@ function PromptCardView(props: {
 
 function Composer(props: { onRun: (instruction: string) => void; onStop: () => void; running: boolean }) {
   const [text, setText] = createSignal("");
+  const voice = createVoiceInput((updater) => setText((value) => updater(value)));
   const disabled = () => !props.running && !text().trim();
+  onCleanup(() => voice.cleanup());
 
   function submit() {
     if (props.running) {
@@ -723,6 +826,17 @@ function Composer(props: { onRun: (instruction: string) => void; onStop: () => v
           }}
           disabled={props.running}
         />
+        <button
+          class="composer-voice-btn"
+          classList={{ recording: voice.recording(), busy: voice.busy() }}
+          disabled={props.running || voice.busy()}
+          onClick={voice.toggle}
+          title={voice.recording() ? "停止录音并识别" : "语音输入"}
+        >
+          <Show when={voice.recording()} fallback={<MicIcon />}>
+            <span>■</span>
+          </Show>
+        </button>
         <button class="composer-send-btn" classList={{ running: props.running }} disabled={disabled()} onClick={submit} title={props.running ? "停止任务" : "发送任务"}>
           <Show when={props.running} fallback={<span>↑</span>}>
             <span>■</span>

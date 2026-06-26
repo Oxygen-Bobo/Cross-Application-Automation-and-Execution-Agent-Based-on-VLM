@@ -257,23 +257,30 @@ def execute_action(computer_tools, action_parameter, artifact_manager=None, outp
         time.sleep(action_parameter.get("time", 2))
     elif action_type == "answer":
         StepPopup.show_blocking(
-            "Task Finished",
+            "任务完成",
             action_parameter["text"],
             image_path="",
-            timeout_sec=120,
-            width=960,
-            height=540,
+            timeout_sec=8,
+            width=520,
+            height=360,
+            image_ratio=0.0,
         )
         return True, "success", action_parameter["text"]
     elif action_type in ("stop", "terminate", "done"):
         status = action_parameter.get("status", "success")
+        normalized_status = str(status).lower()
+        popup_title = "任务完成" if normalized_status in {"success", "completed", "done"} else "任务已结束"
+        popup_text = "任务已执行完成。\n\n你可以返回主界面查看执行过程和结果。"
+        if normalized_status not in {"success", "completed", "done"}:
+            popup_text = f"任务已结束，状态：{status}\n\n你可以返回主界面查看执行过程和结果。"
         StepPopup.show_blocking(
-            "Task Completed",
-            f"Task completed with status: {status}",
+            popup_title,
+            popup_text,
             image_path="",
-            timeout_sec=120,
-            width=960,
-            height=540,
+            timeout_sec=5,
+            width=520,
+            height=360,
+            image_ratio=0.0,
         )
         return True, status, f"Task completed with status: {status}"
     elif action_type == "interact":

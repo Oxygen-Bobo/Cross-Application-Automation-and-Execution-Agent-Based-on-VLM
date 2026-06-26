@@ -22,19 +22,28 @@ if (-not $pyInstallerReady) {
   }
 }
 
-Push-Location $repoRoot
-try {
+function Build-OneFilePython($entryFile, $name) {
   python -m PyInstaller `
     --clean `
     --onefile `
-    --name agent_bridge `
+    --name $name `
     --distpath $agentOutput `
-    --workpath $workPath `
+    --workpath (Join-Path $workPath $name) `
     --specpath $workPath `
     --paths $repoRoot `
-    agent_bridge.py
+    $entryFile
   if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller failed with exit code $LASTEXITCODE"
+    throw "PyInstaller failed for $entryFile with exit code $LASTEXITCODE"
+  }
+}
+
+Push-Location $repoRoot
+try {
+  Build-OneFilePython "agent_bridge.py" "agent_bridge"
+
+  $speechHelper = Join-Path $repoRoot "speech_to_text.py"
+  if (Test-Path $speechHelper) {
+    Build-OneFilePython "speech_to_text.py" "speech_to_text"
   }
 } finally {
   Pop-Location
@@ -45,4 +54,12 @@ if (-not (Test-Path $exePath)) {
   throw "Agent executable was not generated: $exePath"
 }
 
+$speechExePath = Join-Path $agentOutput "speech_to_text.exe"
+if (Test-Path (Join-Path $repoRoot "speech_to_text.py") -and -not (Test-Path $speechExePath)) {
+  throw "Speech executable was not generated: $speechExePath"
+}
+
 Write-Host "Agent executable generated: $exePath"
+if (Test-Path $speechExePath) {
+  Write-Host "Speech executable generated: $speechExePath"
+}

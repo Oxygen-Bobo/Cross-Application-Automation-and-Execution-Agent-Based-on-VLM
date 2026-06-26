@@ -180,6 +180,12 @@ export interface ElectronAPI {
     onTaskStarted: (cb: (d: any) => void) => () => void;
     onTaskFinished: (cb: (d: any) => void) => () => void;
   };
+  speech: {
+    transcribe: (payload: {
+      audioBase64: string;
+      mimeType?: string;
+    }) => Promise<{ ok: boolean; text?: string; error?: string }>;
+  };
 }
 
 declare global {
