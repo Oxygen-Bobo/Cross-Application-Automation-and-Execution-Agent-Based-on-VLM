@@ -33,7 +33,7 @@ from artifact_manager import ArtifactManager
 from desktop_state import capture_desktop_state, render_desktop_state
 from failure_recovery import RecoveryTracker, action_signature
 
-API_KEY = "sk-ws-H.RPEIMEH.dBrN.MEQCIFzV2Scc_QsDTvs1a2WVrw2t1TeMMNfqH5qi6Gqof5arAiAzllm-aN8hRipTNj6E8MLreHHil0ThualYvWngnH4qog"
+API_KEY = ""
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen3-vl-plus"
 MAX_STEPS = 50
