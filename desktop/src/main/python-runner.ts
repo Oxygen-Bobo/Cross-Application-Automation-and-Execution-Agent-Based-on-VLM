@@ -1,14 +1,16 @@
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
 import { ipcMain, BrowserWindow, shell, app } from "electron";
 import { join } from "path";
 import { homedir } from "os";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
 import { getCurrentUserDataPathSync } from "./services/authService";
 
 let currentProcess: ChildProcess | null = null;
 let currentTaskId: string | null = null;
 let currentFinalStatus: string | null = null;
 let currentFinalError: string | null = null;
+let currentStopRequested = false;
+let currentOutputDir: string | null = null;
 
 function getBridgePath(): string {
   if (app.isPackaged) {
@@ -78,8 +80,74 @@ export function isAgentRunning(): boolean {
   return currentProcess !== null && currentProcess.exitCode === null;
 }
 
+function isAgentScreenshotFile(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return lower.endsWith(".png");
+}
+
+function cleanupRunScreenshots(outputDir: string | null) {
+  if (!outputDir || !existsSync(outputDir)) return;
+  try {
+    for (const filename of readdirSync(outputDir)) {
+      if (!isAgentScreenshotFile(filename)) continue;
+      const filePath = join(outputDir, filename);
+      try {
+        if (statSync(filePath).isFile()) unlinkSync(filePath);
+      } catch {}
+    }
+  } catch (error) {
+    console.warn("[agent] failed to clean screenshots", error);
+  }
+}
+
 export function getCurrentTaskId(): string | null {
   return currentTaskId;
+}
+
+function killProcessTree(proc: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (!proc.pid || proc.exitCode !== null) {
+      resolve();
+      return;
+    }
+
+    if (process.platform === "win32") {
+      execFile("taskkill", ["/pid", String(proc.pid), "/t", "/f"], { windowsHide: true }, () => resolve());
+      return;
+    }
+
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+    setTimeout(() => {
+      try {
+        if (proc.exitCode === null) proc.kill("SIGKILL");
+      } catch {}
+      resolve();
+    }, 800);
+  });
+}
+
+export async function stopAgentProcess(reason = "任务已停止"): Promise<{ ok: boolean; error?: string }> {
+  const proc = currentProcess;
+  if (!proc || proc.exitCode !== null) {
+    return { ok: false, error: "No agent run in progress." };
+  }
+
+  currentStopRequested = true;
+  currentFinalStatus = "stopped";
+  currentFinalError = reason;
+
+  try {
+    await killProcessTree(proc);
+  } catch (e: any) {
+    try {
+      proc.kill("SIGKILL");
+    } catch {}
+    return { ok: false, error: e?.message || String(e) };
+  }
+
+  return { ok: true };
 }
 
 export function startAgentProcess(
@@ -93,6 +161,8 @@ export function startAgentProcess(
   currentTaskId = params.taskId || null;
   currentFinalStatus = null;
   currentFinalError = null;
+  currentStopRequested = false;
+  currentOutputDir = params.outputDir;
 
   const agentCommand = buildAgentCommand(params);
   if (agentCommand.error) {
@@ -113,6 +183,7 @@ export function startAgentProcess(
   });
 
   currentProcess.stdout?.on("data", (chunk: Buffer) => {
+    if (currentStopRequested) return;
     const text = chunk.toString("utf-8");
     const lines = text.split("\n").filter((l) => l.trim());
     for (const line of lines) {
@@ -130,6 +201,7 @@ export function startAgentProcess(
   });
 
   currentProcess.stderr?.on("data", (chunk: Buffer) => {
+    if (currentStopRequested) return;
     sendToRenderer("agent:stderr", { text: chunk.toString("utf-8"), taskId: currentTaskId });
   });
 
@@ -137,30 +209,36 @@ export function startAgentProcess(
     const info: AgentFinishInfo = {
       exitCode: code,
       taskId: currentTaskId || undefined,
-      status: currentFinalStatus || (code === 0 ? "success" : "failed"),
+      status: currentStopRequested ? "stopped" : (currentFinalStatus || (code === 0 ? "success" : "failed")),
       error: currentFinalError || undefined,
     };
     sendToRenderer("agent:finished", info);
     onFinish?.(info);
+    cleanupRunScreenshots(currentOutputDir);
     currentProcess = null;
     currentTaskId = null;
     currentFinalStatus = null;
     currentFinalError = null;
+    currentStopRequested = false;
+    currentOutputDir = null;
   });
 
   currentProcess.on("error", (err) => {
     const info: AgentFinishInfo = {
       exitCode: 1,
       taskId: currentTaskId || undefined,
-      status: "failed",
+      status: currentStopRequested ? "stopped" : "failed",
       error: err.message,
     };
-    sendToRenderer("agent:error", { message: err.message, taskId: currentTaskId });
+    if (!currentStopRequested) sendToRenderer("agent:error", { message: err.message, taskId: currentTaskId });
     onFinish?.(info);
+    cleanupRunScreenshots(currentOutputDir);
     currentProcess = null;
     currentTaskId = null;
     currentFinalStatus = null;
     currentFinalError = null;
+    currentStopRequested = false;
+    currentOutputDir = null;
   });
 
   return { ok: true };
@@ -179,20 +257,7 @@ export function registerPythonHandlers(ipc: typeof ipcMain) {
   });
 
   ipc.handle("agent:stop", async () => {
-    if (!currentProcess || currentProcess.exitCode !== null) {
-      return { ok: false, error: "No agent run in progress." };
-    }
-    try {
-      currentProcess.kill("SIGTERM");
-      setTimeout(() => {
-        if (currentProcess && currentProcess.exitCode === null) {
-          currentProcess.kill("SIGKILL");
-        }
-      }, 2000);
-    } catch (e: any) {
-      return { ok: false, error: e.message };
-    }
-    return { ok: true };
+    return stopAgentProcess();
   });
 
   ipc.handle("agent:openOutputFolder", async (_event, outputDir: string) => {

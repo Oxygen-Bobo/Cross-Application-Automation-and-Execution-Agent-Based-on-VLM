@@ -176,6 +176,7 @@ export default function ChatView() {
   let timer: number | null = null;
   let persistTimer: number | null = null;
   let listeners: (() => void)[] = [];
+  const stoppedRunIds = new Set<string>();
 
   async function refreshHistory() {
     try {
@@ -298,6 +299,7 @@ export default function ChatView() {
       window.electronAPI.agent.onStdout((data: { text: string }) => {
         setActiveRun((prev) => {
           if (!prev) return prev;
+          if (prev.status === "stopped" || stoppedRunIds.has(prev.id)) return prev;
           const next = applyAgentEventToRun(prev, parseAgentStdoutLine(data.text, prev.currentStep));
           persistRun(next);
           return next;
@@ -306,11 +308,23 @@ export default function ChatView() {
         updateFloating();
       }),
       window.electronAPI.agent.onEvent((event: AgentEvent) => {
+        const runId = (event as any).runId;
+        const current = activeRun();
+        if (current?.status === "stopped" && event.type !== "run_started") return;
+        if (runId && stoppedRunIds.has(runId) && event.type !== "run_finished") return;
         handleAgentEvent(event);
         scrollDown();
         updateFloating();
       }),
-      window.electronAPI.agent.onFinished((data) => finishRun(data.exitCode === 0 ? "completed" : "failed")),
+      window.electronAPI.agent.onFinished((data: any) => {
+        if (data?.status === "stopped") {
+          finishRun("stopped");
+          return;
+        }
+        const current = activeRun();
+        if (current?.status === "stopped" || (current?.id && stoppedRunIds.has(current.id))) return;
+        finishRun(data.exitCode === 0 ? "completed" : "failed");
+      }),
       window.electronAPI.agent.onError(() => finishRun("failed")),
       (window as any).desktopAgent?.onHistoryUpdated?.(() => refreshHistory()) || (() => {}),
     ];
@@ -322,10 +336,13 @@ export default function ChatView() {
     listeners.forEach((dispose) => dispose());
   });
 
-  function finishRun(status: "completed" | "failed") {
+  function finishRun(status: "completed" | "failed" | "stopped") {
     setActiveRun((prev) => {
       if (!prev) return prev;
+      if (prev.status === "stopped" && status !== "stopped") return prev;
       const timestamp = Date.now();
+      const isCompleted = status === "completed";
+      const isStopped = status === "stopped";
       return {
         ...prev,
         status,
@@ -340,21 +357,21 @@ export default function ChatView() {
                 phases: {
                   capture: {
                     ...step.phases.capture,
-                    status: step.phases.capture.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.capture.status,
+                    status: step.phases.capture.status === "running" ? (isCompleted ? "success" : "error") : step.phases.capture.status,
                   },
                   ai: {
                     ...step.phases.ai,
-                    status: step.phases.ai.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.ai.status,
+                    status: step.phases.ai.status === "running" ? (isCompleted ? "success" : "error") : step.phases.ai.status,
                   },
                   action: {
                     ...step.phases.action,
-                    status: step.phases.action.status === "running" ? (status === "completed" ? "success" : "error") : step.phases.action.status,
+                    status: step.phases.action.status === "running" ? (isCompleted ? "success" : "error") : step.phases.action.status,
                   },
                 },
               }
             : step,
         ),
-        currentActionText: status === "completed" ? "任务已完成" : "任务执行失败",
+        currentActionText: isCompleted ? "任务已完成" : isStopped ? "任务已停止" : "任务执行失败",
       };
     });
     persistRunNow();
@@ -364,7 +381,7 @@ export default function ChatView() {
         status,
         currentStep: run.currentStep,
         maxSteps: run.maxSteps,
-        actionText: status === "completed" ? "任务已完成" : "任务执行失败",
+        actionText: status === "completed" ? "任务已完成" : status === "stopped" ? "任务已停止" : "任务执行失败",
         instruction: run.instruction,
         currentPhase: status,
         progressPercent: status === "completed" ? 100 : 50,
@@ -377,6 +394,7 @@ export default function ChatView() {
   function handleAgentEvent(event: AgentEvent) {
     switch (event.type) {
       case "run_started":
+        stoppedRunIds.delete(event.runId);
         setElapsed(0);
         setActiveRun({
           id: event.runId,
@@ -458,7 +476,7 @@ export default function ChatView() {
         });
         break;
       case "run_finished":
-        finishRun(event.status === "success" ? "completed" : "failed");
+        finishRun(event.status === "success" || event.status === "completed" ? "completed" : event.status === "stopped" ? "stopped" : "failed");
         break;
     }
   }
@@ -519,11 +537,16 @@ export default function ChatView() {
   }
 
   async function stop() {
-    await window.electronAPI.agent.stop();
-    setActiveRun((prev) => (prev ? { ...prev, status: "stopped", endedAt: Date.now(), currentActionText: "任务已停止" } : prev));
+    const run = activeRun();
+    if (run) stoppedRunIds.add(run.id);
+    finishRun("stopped");
     window.electronAPI.floating.update({ status: "stopped", actionText: "任务已停止", currentPhase: "stopped" });
     setTimeout(() => window.electronAPI.floating.hide(), 800);
     persistRunNow();
+    const result = await window.electronAPI.agent.stop();
+    if (!result.ok && result.error !== "No agent run in progress.") {
+      console.warn("Failed to stop agent:", result.error);
+    }
   }
 
   function updatePrompt(card: PromptCard) {

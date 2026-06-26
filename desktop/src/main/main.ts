@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import { registerConfigHandlers } from "./config-store";
-import { registerPythonHandlers } from "./python-runner";
+import { registerPythonHandlers, stopAgentProcess } from "./python-runner";
 import {
   createFloatingBall,
   showFloating,
@@ -13,6 +13,7 @@ import {
   startFloatingDrag,
   moveFloating,
   endFloatingDrag,
+  getFloating,
 } from "./floating-ball";
 import { HistoryStore } from "./historyStore";
 import { initScheduler, reloadSchedulerForCurrentUser, stopScheduler } from "./scheduler";
@@ -69,6 +70,13 @@ function createWindow() {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false, contextIsolation: true, nodeIntegration: false,
     },
+  });
+
+  mainWindow.on("close", () => {
+    void stopAgentProcess("主窗口已关闭");
+    stopScheduler();
+    const floating = getFloating();
+    if (floating && !floating.isDestroyed()) floating.close();
   });
 
   mainWindow.on("closed", () => {
@@ -172,7 +180,13 @@ app.on("second-instance", () => {
 });
 
 app.on("window-all-closed", () => {
+  void stopAgentProcess("应用窗口已关闭");
   hideFloating();
   stopScheduler();
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  void stopAgentProcess("应用退出");
+  stopScheduler();
 });

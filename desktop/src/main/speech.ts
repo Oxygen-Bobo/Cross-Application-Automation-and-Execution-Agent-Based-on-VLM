@@ -4,20 +4,22 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { app, ipcMain } from "electron";
 
-function getSpeechTarget(): { command: string; argsPrefix: string[]; error?: string } {
+function getSpeechTarget(): { command: string; argsPrefix: string[]; resourceDir: string; error?: string } {
   if (app.isPackaged) {
-    const exePath = join(process.resourcesPath, "agent", process.platform === "win32" ? "speech_to_text.exe" : "speech_to_text");
+    const resourceDir = join(process.resourcesPath, "agent");
+    const exePath = join(resourceDir, process.platform === "win32" ? "speech_to_text.exe" : "speech_to_text");
     if (!existsSync(exePath)) {
-      return { command: "", argsPrefix: [], error: `语音识别程序不存在：${exePath}` };
+      return { command: "", argsPrefix: [], resourceDir, error: `语音识别程序不存在：${exePath}` };
     }
-    return { command: exePath, argsPrefix: [] };
+    return { command: exePath, argsPrefix: [], resourceDir };
   }
 
   const scriptPath = join(__dirname, "..", "..", "..", "speech_to_text.py");
+  const resourceDir = join(__dirname, "..", "..", "..", "desktop", "resources", "agent");
   if (!existsSync(scriptPath)) {
-    return { command: "", argsPrefix: [], error: `语音识别脚本不存在：${scriptPath}` };
+    return { command: "", argsPrefix: [], resourceDir, error: `语音识别脚本不存在：${scriptPath}` };
   }
-  return { command: process.platform === "win32" ? "python" : "python3", argsPrefix: [scriptPath] };
+  return { command: process.platform === "win32" ? "python" : "python3", argsPrefix: [scriptPath], resourceDir };
 }
 
 function getAudioExtension(mimeType?: string): string {
@@ -47,10 +49,24 @@ export function registerSpeechHandlers(ipc: typeof ipcMain) {
         settled = true;
         resolve(result);
       };
-      const child = spawn(target.command, [...target.argsPrefix, "--audio", audioPath], {
+      const pathSeparator = process.platform === "win32" ? ";" : ":";
+      const ffmpegPath = join(target.resourceDir, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+      const child = spawn(target.command, [
+        ...target.argsPrefix,
+        "--audio",
+        audioPath,
+        "--model-dir",
+        target.resourceDir,
+        "--ffmpeg",
+        ffmpegPath,
+      ], {
         windowsHide: true,
         env: {
           ...process.env,
+          AGENT_SPEECH_RESOURCE_DIR: target.resourceDir,
+          FFMPEG_PATH: ffmpegPath,
+          WHISPER_MODEL_DIR: target.resourceDir,
+          PATH: `${target.resourceDir}${pathSeparator}${process.env.PATH || ""}`,
           PYTHONIOENCODING: "utf-8",
           PYTHONUTF8: "1",
         },
