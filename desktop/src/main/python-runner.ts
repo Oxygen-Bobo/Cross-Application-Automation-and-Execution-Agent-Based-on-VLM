@@ -5,6 +5,9 @@ import { homedir } from "os";
 import { existsSync, mkdirSync } from "fs";
 
 let currentProcess: ChildProcess | null = null;
+let currentTaskId: string | null = null;
+let currentFinalStatus: string | null = null;
+let currentFinalError: string | null = null;
 
 function getBridgePath(): string {
   // agent_bridge.py is one directory above the desktop/ folder
@@ -24,6 +27,122 @@ function sendToRenderer(evt: string, data: unknown) {
   }
 }
 
+export interface AgentProcessParams {
+  instruction: string;
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  maxSteps: number;
+  outputDir: string;
+  taskId?: string;
+}
+
+export interface AgentFinishInfo {
+  exitCode: number | null;
+  taskId?: string;
+  status?: string;
+  error?: string;
+}
+
+export function isAgentRunning(): boolean {
+  return currentProcess !== null && currentProcess.exitCode === null;
+}
+
+export function getCurrentTaskId(): string | null {
+  return currentTaskId;
+}
+
+export function startAgentProcess(
+  params: AgentProcessParams,
+  onFinish?: (info: AgentFinishInfo) => void,
+): { ok: boolean; error?: string } {
+  if (isAgentRunning()) {
+    return { ok: false, error: "An agent run is already in progress." };
+  }
+
+  currentTaskId = params.taskId || null;
+  currentFinalStatus = null;
+  currentFinalError = null;
+
+  const bridgePath = getBridgePath();
+  const python = getPythonCommand();
+
+  const args = [
+    bridgePath,
+    "--instruction", params.instruction,
+    "--base-url", params.baseUrl,
+    "--model-name", params.modelName,
+    "--max-steps", String(params.maxSteps),
+    "--output-dir", params.outputDir,
+  ];
+
+  const env = {
+    ...process.env,
+    AGENT_API_KEY: params.apiKey,
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
+  };
+
+  currentProcess = spawn(python, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env,
+  });
+
+  currentProcess.stdout?.on("data", (chunk: Buffer) => {
+    const text = chunk.toString("utf-8");
+    const lines = text.split("\n").filter((l) => l.trim());
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj?.type === "run_finished") {
+          currentFinalStatus = obj.status || null;
+          currentFinalError = obj.error || obj.message || null;
+        }
+        sendToRenderer("agent:event", currentTaskId ? { ...obj, taskId: currentTaskId } : obj);
+      } catch {
+        sendToRenderer("agent:stdout", { text: line, taskId: currentTaskId });
+      }
+    }
+  });
+
+  currentProcess.stderr?.on("data", (chunk: Buffer) => {
+    sendToRenderer("agent:stderr", { text: chunk.toString("utf-8"), taskId: currentTaskId });
+  });
+
+  currentProcess.on("close", (code) => {
+    const info: AgentFinishInfo = {
+      exitCode: code,
+      taskId: currentTaskId || undefined,
+      status: currentFinalStatus || (code === 0 ? "success" : "failed"),
+      error: currentFinalError || undefined,
+    };
+    sendToRenderer("agent:finished", info);
+    onFinish?.(info);
+    currentProcess = null;
+    currentTaskId = null;
+    currentFinalStatus = null;
+    currentFinalError = null;
+  });
+
+  currentProcess.on("error", (err) => {
+    const info: AgentFinishInfo = {
+      exitCode: 1,
+      taskId: currentTaskId || undefined,
+      status: "failed",
+      error: err.message,
+    };
+    sendToRenderer("agent:error", { message: err.message, taskId: currentTaskId });
+    onFinish?.(info);
+    currentProcess = null;
+    currentTaskId = null;
+    currentFinalStatus = null;
+    currentFinalError = null;
+  });
+
+  return { ok: true };
+}
+
 export function registerPythonHandlers(ipc: typeof ipcMain) {
   ipc.handle("agent:start", async (_event, params: {
     instruction: string;
@@ -33,68 +152,7 @@ export function registerPythonHandlers(ipc: typeof ipcMain) {
     maxSteps: number;
     outputDir: string;
   }) => {
-    if (currentProcess && currentProcess.exitCode === null) {
-      return { ok: false, error: "An agent run is already in progress." };
-    }
-
-    const bridgePath = getBridgePath();
-    const python = getPythonCommand();
-
-    const args = [
-      bridgePath,
-      "--instruction", params.instruction,
-      "--base-url", params.baseUrl,
-      "--model-name", params.modelName,
-      "--max-steps", String(params.maxSteps),
-      "--output-dir", params.outputDir,
-    ];
-
-    // Pass API key via environment variable, NOT command-line args
-    // Force UTF-8 on Windows to prevent Chinese character garbling
-    const env = {
-      ...process.env,
-      AGENT_API_KEY: params.apiKey,
-      PYTHONIOENCODING: "utf-8",
-      PYTHONUTF8: "1",
-    };
-
-    currentProcess = spawn(python, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      env,
-    });
-
-    // --- stdout: JSON Lines events ---------------------------------------
-    currentProcess.stdout?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString("utf-8");
-      const lines = text.split("\n").filter((l) => l.trim());
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          sendToRenderer("agent:event", obj);
-        } catch {
-          sendToRenderer("agent:stdout", { text: line });
-        }
-      }
-    });
-
-    // --- stderr -----------------------------------------------------------
-    currentProcess.stderr?.on("data", (chunk: Buffer) => {
-      sendToRenderer("agent:stderr", { text: chunk.toString("utf-8") });
-    });
-
-    // --- exit -------------------------------------------------------------
-    currentProcess.on("close", (code) => {
-      sendToRenderer("agent:finished", { exitCode: code });
-      currentProcess = null;
-    });
-
-    currentProcess.on("error", (err) => {
-      sendToRenderer("agent:error", { message: err.message });
-      currentProcess = null;
-    });
-
-    return { ok: true };
+    return startAgentProcess(params);
   });
 
   ipc.handle("agent:stop", async () => {

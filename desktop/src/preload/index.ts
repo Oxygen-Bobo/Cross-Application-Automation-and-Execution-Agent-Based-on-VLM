@@ -8,6 +8,16 @@ export interface AgentStartParams {
   instruction: string; apiKey: string; baseUrl: string; modelName: string;
   maxSteps: number; outputDir: string;
 }
+export type ScheduleRepeat = "once" | "daily" | "weekday" | "weekly";
+export interface ScheduledTaskDTO {
+  id: string; enabled: boolean; instruction: string;
+  targetApp: string; targetAppLabel: string;
+  scheduledDate: string | null; scheduledTime: string;
+  repeat: ScheduleRepeat; repeatDay?: number;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  lastRunAt?: string; lastRunStatus?: string; lastRunError?: string;
+  createdAt: string; updatedAt: string; nextRunAt: string | null;
+}
 
 const electronAPI = {
   config: {
@@ -49,6 +59,16 @@ const electronAPI = {
     dragEnd: (): Promise<void> => ipcRenderer.invoke("floating:dragEnd"),
     onStatusChanged: (cb: (d: any) => void) => { const h = (_: any, d: any) => cb(d); ipcRenderer.on("floating:statusChanged", h); return () => ipcRenderer.removeListener("floating:statusChanged", h); },
     onStopTask: (cb: () => void) => { const h = () => cb(); ipcRenderer.on("floating:stopTask", h); return () => ipcRenderer.removeListener("floating:stopTask", h); },
+  },
+  scheduler: {
+    list: (): Promise<ScheduledTaskDTO[]> => ipcRenderer.invoke("scheduler:list"),
+    create: (params: Partial<ScheduledTaskDTO>): Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }> => ipcRenderer.invoke("scheduler:create", params),
+    update: (id: string, patch: Partial<ScheduledTaskDTO>): Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }> => ipcRenderer.invoke("scheduler:update", { id, patch }),
+    delete: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("scheduler:delete", id),
+    toggle: (id: string, enabled: boolean): Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }> => ipcRenderer.invoke("scheduler:toggle", { id, enabled }),
+    runNow: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("scheduler:runNow", id),
+    onTaskStarted: (cb: (d: any) => void) => { const h = (_: any, d: any) => cb(d); ipcRenderer.on("scheduler:taskStarted", h); return () => ipcRenderer.removeListener("scheduler:taskStarted", h); },
+    onTaskFinished: (cb: (d: any) => void) => { const h = (_: any, d: any) => cb(d); ipcRenderer.on("scheduler:taskFinished", h); return () => ipcRenderer.removeListener("scheduler:taskFinished", h); },
   },
 };
 

@@ -15,6 +15,25 @@ export interface AgentStartParams {
   maxSteps: number;
   outputDir: string;
 }
+export type ScheduleRepeat = "once" | "daily" | "weekday" | "weekly";
+export interface ScheduledTaskDTO {
+  id: string;
+  enabled: boolean;
+  instruction: string;
+  targetApp: string;
+  targetAppLabel: string;
+  scheduledDate: string | null;
+  scheduledTime: string;
+  repeat: ScheduleRepeat;
+  repeatDay?: number;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  lastRunAt?: string;
+  lastRunStatus?: string;
+  lastRunError?: string;
+  createdAt: string;
+  updatedAt: string;
+  nextRunAt: string | null;
+}
 
 export interface FloatingUpdate {
   status: string;
@@ -91,6 +110,16 @@ export interface ElectronAPI {
     dragEnd: () => Promise<void>;
     onStatusChanged: (cb: (d: any) => void) => () => void;
     onStopTask: (cb: () => void) => () => void;
+  };
+  scheduler: {
+    list: () => Promise<ScheduledTaskDTO[]>;
+    create: (params: Partial<ScheduledTaskDTO>) => Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }>;
+    update: (id: string, patch: Partial<ScheduledTaskDTO>) => Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }>;
+    delete: (id: string) => Promise<{ ok: boolean; error?: string }>;
+    toggle: (id: string, enabled: boolean) => Promise<{ ok: boolean; task?: ScheduledTaskDTO; error?: string }>;
+    runNow: (id: string) => Promise<{ ok: boolean; error?: string }>;
+    onTaskStarted: (cb: (d: any) => void) => () => void;
+    onTaskFinished: (cb: (d: any) => void) => () => void;
   };
 }
 

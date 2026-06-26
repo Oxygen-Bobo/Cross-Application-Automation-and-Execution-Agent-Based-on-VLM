@@ -31,6 +31,17 @@ export interface AgentRun {
 
 export interface HistoryRun { id:string; instruction:string; status:RunStatus; createdAt:string; stepCount:number; maxSteps:number; elapsedMs:number; completed:boolean }
 
+export type ScheduleRepeat = "once"|"daily"|"weekday"|"weekly";
+export interface ScheduledTaskDTO {
+  id:string; enabled:boolean; instruction:string;
+  targetApp:string; targetAppLabel:string;
+  scheduledDate:string|null; scheduledTime:string;
+  repeat:ScheduleRepeat; repeatDay?:number;
+  status:"pending"|"running"|"completed"|"failed"|"cancelled";
+  lastRunAt?:string; lastRunStatus?:string; lastRunError?:string;
+  createdAt:string; updatedAt:string; nextRunAt:string|null;
+}
+
 export type AgentUiEvent = { type:"step_started"|"capture_started"|"capture_finished"|"ai_started"|"ai_finished"|"action_detected"|"action_started"|"action_finished"|"error"|"finished"|"raw"; step?:number; title?:string; message:string; raw:string; screenshotPath?:string; actionText?:string; error?:string };
 
 export type AgentEvent =

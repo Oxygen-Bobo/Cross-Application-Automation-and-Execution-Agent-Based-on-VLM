@@ -13,6 +13,7 @@ import {
   endFloatingDrag,
 } from "./floating-ball";
 import { HistoryStore } from "./historyStore";
+import { initScheduler, stopScheduler } from "./scheduler";
 
 const historyStore = new HistoryStore();
 
@@ -71,6 +72,7 @@ app.whenReady().then(() => {
   registerProtocols();
   registerConfigHandlers(ipcMain);
   registerPythonHandlers(ipcMain);
+  initScheduler(ipcMain);
 
   // Floating window IPC
   const ACTIVE = ["running","planning","observing","capturing","thinking","acting","waiting"];
@@ -136,5 +138,6 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   hideFloating();
+  stopScheduler();
   if (process.platform !== "darwin") app.quit();
 });

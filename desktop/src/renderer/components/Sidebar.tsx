@@ -6,6 +6,7 @@ interface Props {
   onNewTask: () => void;
   onSelectHistory: (id: string) => void;
   onDeleteHistory: (id: string) => void;
+  onOpenSchedule: () => void;
   onOpenSettings: () => void;
   selectedId?: string;
   currentStatus: string;
@@ -80,6 +81,35 @@ export default function Sidebar(props: Props) {
       <div class="px-4 pb-3">
         <button data-component="button" data-variant="primary" style="width:100%" onClick={props.onNewTask}>
           + 新建任务
+        </button>
+      </div>
+
+      <div class="px-4 pb-3">
+        <button
+          data-component="button"
+          data-variant="ghost"
+          style="width:100%;background:var(--bg-soft);border:1px solid var(--border-light);color:var(--text-primary);transition:background .16s ease,border-color .16s ease,transform .16s ease,box-shadow .16s ease"
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--brand-soft)";
+            e.currentTarget.style.borderColor = "color-mix(in srgb,var(--brand) 28%,var(--border-light))";
+            e.currentTarget.style.transform = "translateY(-1px)";
+            e.currentTarget.style.boxShadow = "0 8px 18px rgba(67,51,34,.08)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--bg-soft)";
+            e.currentTarget.style.borderColor = "var(--border-light)";
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.boxShadow = "none";
+          }}
+          onClick={props.onOpenSchedule}
+        >
+          <span style="display:inline-flex;align-items:center;gap:8px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+            定时任务
+          </span>
         </button>
       </div>
 

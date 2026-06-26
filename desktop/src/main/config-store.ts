@@ -2,7 +2,7 @@ import { safeStorage, ipcMain, app } from "electron";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
-interface StoredConfig {
+export interface StoredConfig {
   baseUrl: string;
   modelName: string;
   maxRetry: number;
@@ -36,6 +36,21 @@ function loadConfig(): StoredConfig {
     }
   } catch {}
   return { ...DEFAULTS };
+}
+
+export function getConfig(): StoredConfig {
+  return loadConfig();
+}
+
+export function getDecryptedApiKey(): string | null {
+  const cfg = loadConfig();
+  const enc = cfg.encryptedKey;
+  if (!enc || !safeStorage.isEncryptionAvailable()) return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(enc, "base64"));
+  } catch {
+    return null;
+  }
 }
 
 function saveConfig(cfg: StoredConfig): void {

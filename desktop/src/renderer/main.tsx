@@ -3,6 +3,7 @@ import { Router, Route } from "@solidjs/router";
 import App from "./App";
 import ChatView from "./routes/ChatView";
 import ApiSettingsView from "./routes/ApiSettingsView";
+import ScheduleView from "./routes/ScheduleView";
 import "./styles/global.css";
 
 // Dynamic import for floating ball to avoid bundling it in main app
@@ -15,6 +16,7 @@ if (isFloating) {
     () => (
       <Router root={App}>
         <Route path="/" component={ChatView} />
+        <Route path="/schedule" component={ScheduleView} />
         <Route path="/settings" component={ApiSettingsView} />
       </Router>
     ),
