@@ -14,11 +14,11 @@
 </p>
 
 <p align="center">
-  <a href="#-核心亮点">核心亮点</a> ·
-  <a href="#-快速开始">快速开始</a> ·
-  <a href="#-桌面端功能">桌面端功能</a> ·
-  <a href="#-系统架构">系统架构</a> ·
-  <a href="#-打包发布">打包发布</a>
+  <a href="#核心亮点">核心亮点</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#桌面端功能">桌面端功能</a> ·
+  <a href="#系统架构">系统架构</a> ·
+  <a href="#打包发布">打包发布</a>
 </p>
 
 ---
@@ -26,6 +26,20 @@
 ## 🌟 项目简介
 
 **跨应用自动化执行 Agent** 是一个面向 Windows 桌面环境的智能自动化系统。用户只需要输入自然语言任务，Agent 会观察屏幕、理解界面、规划步骤，并像人一样操作鼠标和键盘，在浏览器、微信、QQ、邮箱、WPS、Office、资源管理器等应用之间完成跨应用任务。
+
+<p align="center">
+  <strong>一句话目标 → 自动规划 → 操作电脑 → 交付结果</strong>
+</p>
+
+<p align="center">
+  <kbd>🧠 理解任务</kbd>
+  <span> → </span>
+  <kbd>👁️ 观察屏幕</kbd>
+  <span> → </span>
+  <kbd>🖱️ 执行操作</kbd>
+  <span> → </span>
+  <kbd>✅ 验证完成</kbd>
+</p>
 
 典型任务示例：
 
@@ -63,10 +77,8 @@
 
 ## 🖼️ 产品体验
 
-> 当前仓库未内置应用截图。建议在发布前将截图放入 `docs/images/`，并按下面路径替换占位图。
-
 <p align="center">
-  <img src="docs/images/home.png" alt="主界面预览" width="760">
+  <img src="docs/images/main-page.png" alt="主界面预览" width="760">
 </p>
 
 <p align="center">
@@ -74,7 +86,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/timeline.png" alt="任务执行时间线" width="760">
+  <img src="docs/images/sequence-page.png" alt="任务执行时间线" width="760">
 </p>
 
 <p align="center">
@@ -85,56 +97,72 @@
 
 ## 🧭 工作流
 
-```mermaid
-flowchart LR
-  A[用户输入任务] --> B[观察屏幕]
-  B --> C[视觉模型理解界面]
-  C --> D[规划下一步动作]
-  D --> E[解析工具调用]
-  E --> F[执行鼠标/键盘操作]
-  F --> G[记录步骤与状态]
-  G --> H{任务完成?}
-  H -- 否 --> B
-  H -- 是 --> I[验证结果并结束]
-```
+<table>
+  <tr>
+    <td align="center"><strong>1</strong><br>📝 用户输入任务</td>
+    <td align="center">➡️</td>
+    <td align="center"><strong>2</strong><br>👁️ 观察屏幕</td>
+    <td align="center">➡️</td>
+    <td align="center"><strong>3</strong><br>🧠 理解界面</td>
+    <td align="center">➡️</td>
+    <td align="center"><strong>4</strong><br>🧭 规划动作</td>
+  </tr>
+  <tr>
+    <td align="center"><strong>8</strong><br>✅ 验证完成</td>
+    <td align="center">⬅️</td>
+    <td align="center"><strong>7</strong><br>📌 记录状态</td>
+    <td align="center">⬅️</td>
+    <td align="center"><strong>6</strong><br>🖱️ 执行操作</td>
+    <td align="center">⬅️</td>
+    <td align="center"><strong>5</strong><br>🧩 解析工具</td>
+  </tr>
+</table>
+
+<p align="center">
+  <strong>如果任务未完成，Agent 会回到“观察屏幕”，继续下一轮判断与执行。</strong>
+</p>
 
 ---
 
 ## 🧱 系统架构
 
-```mermaid
-flowchart TB
-  subgraph Desktop[Electron 桌面端]
-    UI[SolidJS 前端界面]
-    Main[Electron Main Process]
-    Speech[科大讯飞语音识别]
-    Store[本地账号/配置/任务数据]
-  end
+<table>
+  <tr>
+    <th>🖥️ Electron 桌面端</th>
+    <th>🐍 Python Agent Runtime</th>
+    <th>☁️ 外部智能服务</th>
+  </tr>
+  <tr>
+    <td>
+      <ul>
+        <li>SolidJS 前端界面</li>
+        <li>Electron Main Process</li>
+        <li>账号、配置、定时任务</li>
+        <li>科大讯飞语音输入</li>
+      </ul>
+    </td>
+    <td>
+      <ul>
+        <li><code>agent_bridge.py</code></li>
+        <li><code>utils.py</code> / LangGraph</li>
+        <li><code>agent_skills.py</code></li>
+        <li><code>failure_recovery.py</code></li>
+        <li><code>artifact_manager.py</code></li>
+      </ul>
+    </td>
+    <td>
+      <ul>
+        <li>OpenAI 兼容 VLM API</li>
+        <li>Qwen-VL / DashScope</li>
+        <li>iFLYTEK IAT API</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
-  subgraph Python[Python Agent Runtime]
-    Bridge[agent_bridge.py]
-    Core[utils.py / LangGraph]
-    Skills[agent_skills.py]
-    Recovery[failure_recovery.py]
-    Artifacts[artifact_manager.py]
-  end
-
-  subgraph External[外部服务]
-    VLM[OpenAI 兼容 VLM API]
-    XFYUN[iFLYTEK IAT API]
-  end
-
-  UI <--> Main
-  Main --> Bridge
-  Bridge --> Core
-  Core --> Skills
-  Core --> Recovery
-  Core --> Artifacts
-  Core --> VLM
-  Main --> Speech
-  Speech --> XFYUN
-  Main --> Store
-```
+<p align="center">
+  <kbd>前端界面</kbd> ⇄ <kbd>Electron 主进程</kbd> ⇄ <kbd>Python Agent</kbd> ⇄ <kbd>视觉语言模型</kbd>
+</p>
 
 ---
 
@@ -257,13 +285,17 @@ const XFYUN_API_SECRET = "你的 APISecret";
 
 系统采用分层能力，而不是一次性堆砌“大而全”的软件知识库：
 
-```mermaid
-flowchart TB
-  A[基础桌面能力] --> B[高频应用技能]
-  B --> C[跨应用工作流]
-  C --> D[任务级交付能力]
-  D --> E[失败恢复与验证]
-```
+<p align="center">
+  <kbd>🧱 基础桌面能力</kbd>
+  <span> → </span>
+  <kbd>🧩 高频应用技能</kbd>
+  <span> → </span>
+  <kbd>🔁 跨应用工作流</kbd>
+  <span> → </span>
+  <kbd>📦 任务级交付</kbd>
+  <span> → </span>
+  <kbd>🛟 失败恢复与验证</kbd>
+</p>
 
 | 层级 | 示例 |
 |---|---|
@@ -336,16 +368,6 @@ desktop/release/Desktop Agent-1.0.0-Setup.exe
 | `agent_bridge.exe` | Python Agent 桥接程序 |
 | 支付二维码资源 | 微信 / 支付宝二维码图片 |
 | 本地数据目录 | 用户账号、配置、任务历史和定时任务 |
-
-发布版不再包含：
-
-- Whisper
-- PyTorch 语音运行时
-- ffmpeg
-- `base.pt`
-- `speech_to_text.py`
-
-语音识别改为通过科大讯飞 API 完成，因此安装包体积更小，部署更稳定。
 
 ---
 
