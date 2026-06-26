@@ -55,7 +55,7 @@ if (-not (Test-Path $exePath)) {
 }
 
 $speechExePath = Join-Path $agentOutput "speech_to_text.exe"
-if (Test-Path (Join-Path $repoRoot "speech_to_text.py") -and -not (Test-Path $speechExePath)) {
+if ((Test-Path (Join-Path $repoRoot "speech_to_text.py")) -and -not (Test-Path $speechExePath)) {
   throw "Speech executable was not generated: $speechExePath"
 }
 
