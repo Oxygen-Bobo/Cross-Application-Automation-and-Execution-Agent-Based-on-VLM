@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@solidjs/router": "^0.13.6",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
     "electron": "^32.3.3",
     "electron-builder": "^26.15.3",
@@ -30,7 +31,8 @@
     "esbuild@0.21.5": true
   },
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "ws": "^8.21.0"
   },
   "build": {
     "appId": "com.desktop.agent",

@@ -78,35 +78,93 @@ function savePrompts(prompts: PromptCard[]) {
   localStorage.setItem(PROMPT_KEY, JSON.stringify(prompts));
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
+async function streamToPcmBase64(stream: MediaStream, durationMs = 60000): Promise<string> {
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  const audioContext = new AudioContextClass();
+  const source = audioContext.createMediaStreamSource(stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const samples: Float32Array[] = [];
+  let sampleCount = 0;
+  let stopped = false;
+
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
+    const stop = async () => {
+      if (stopped) return;
+      stopped = true;
+      source.disconnect();
+      processor.disconnect();
+      stream.getTracks().forEach((track) => track.stop());
+      await audioContext.close();
+
+      const merged = new Float32Array(sampleCount);
+      let offset = 0;
+      for (const chunk of samples) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      resolve(floatTo16kPcmBase64(merged, audioContext.sampleRate));
+    };
+    stopPcmRecordingRef.set(stream, stop);
+
+    processor.onaudioprocess = (event) => {
+      const input = event.inputBuffer.getChannelData(0);
+      const copy = new Float32Array(input.length);
+      copy.set(input);
+      samples.push(copy);
+      sampleCount += copy.length;
+    };
+    processor.onerror = () => reject(new Error("录音处理失败"));
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    (stream.getAudioTracks()[0] as any).onended = stop;
+    setTimeout(stop, durationMs);
   });
+}
+
+const stopPcmRecordingRef = new WeakMap<MediaStream, () => Promise<void>>();
+
+function floatTo16kPcmBase64(input: Float32Array, sourceRate: number) {
+  const targetRate = 16000;
+  const ratio = sourceRate / targetRate;
+  const targetLength = Math.max(1, Math.round(input.length / ratio));
+  const pcm = new Int16Array(targetLength);
+
+  for (let i = 0; i < targetLength; i++) {
+    const sourceIndex = i * ratio;
+    const before = Math.floor(sourceIndex);
+    const after = Math.min(before + 1, input.length - 1);
+    const weight = sourceIndex - before;
+    const sample = input[before] * (1 - weight) + input[after] * weight;
+    const clamped = Math.max(-1, Math.min(1, sample));
+    pcm[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+  }
+
+  let binary = "";
+  const bytes = new Uint8Array(pcm.buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function createVoiceInput(setText: (updater: (value: string) => string) => void) {
   const [recording, setRecording] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
-  let recorder: MediaRecorder | null = null;
-  let chunks: Blob[] = [];
   let activeStream: MediaStream | null = null;
+  let stopPcmRecording: (() => Promise<void>) | null = null;
 
   function cleanup() {
     activeStream?.getTracks().forEach((track) => track.stop());
     activeStream = null;
-    recorder = null;
-    chunks = [];
+    stopPcmRecording = null;
     setRecording(false);
     setBusy(false);
   }
 
   async function stopRecording() {
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-    }
+    await stopPcmRecording?.();
   }
 
   async function toggle() {
@@ -118,34 +176,32 @@ function createVoiceInput(setText: (updater: (value: string) => string) => void)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       activeStream = stream;
-      chunks = [];
-      recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
-      };
-      recorder.onstop = async () => {
-        setRecording(false);
-        setBusy(true);
-        stream.getTracks().forEach((track) => track.stop());
-        try {
-          const blob = new Blob(chunks, { type: recorder?.mimeType || "audio/webm" });
-          const audioBase64 = await blobToBase64(blob);
-          const result = await window.electronAPI.speech.transcribe({ audioBase64, mimeType: blob.type });
-          if (!result.ok) {
-            alert(result.error || "语音识别失败");
-            return;
+      const recordingPromise = streamToPcmBase64(stream);
+      stopPcmRecording = () => stopPcmRecordingRef.get(stream)?.() || Promise.resolve();
+      recordingPromise
+        .then(async (audioBase64) => {
+          setRecording(false);
+          setBusy(true);
+          try {
+            const result = await window.electronAPI.speech.transcribe({ audioBase64, mimeType: "audio/pcm", sampleRate: 16000, encoding: "raw" });
+            if (!result.ok) {
+              alert(result.error || "语音识别失败");
+              return;
+            }
+            const recognized = (result.text || "").trim();
+            if (recognized) {
+              setText((value) => `${value}${value.trim() ? "\n" : ""}${recognized}`);
+            }
+          } catch (error: any) {
+            alert(error?.message || "语音识别失败");
+          } finally {
+            cleanup();
           }
-          const recognized = (result.text || "").trim();
-          if (recognized) {
-            setText((value) => `${value}${value.trim() ? "\n" : ""}${recognized}`);
-          }
-        } catch (error: any) {
-          alert(error?.message || "语音识别失败");
-        } finally {
+        })
+        .catch((error: any) => {
           cleanup();
-        }
-      };
-      recorder.start();
+          alert(error?.message || "语音识别失败");
+        });
       setRecording(true);
     } catch (error: any) {
       cleanup();

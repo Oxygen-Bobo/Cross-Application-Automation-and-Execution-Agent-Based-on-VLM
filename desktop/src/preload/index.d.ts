@@ -184,6 +184,8 @@ export interface ElectronAPI {
     transcribe: (payload: {
       audioBase64: string;
       mimeType?: string;
+      sampleRate?: number;
+      encoding?: "raw";
     }) => Promise<{ ok: boolean; text?: string; error?: string }>;
   };
 }

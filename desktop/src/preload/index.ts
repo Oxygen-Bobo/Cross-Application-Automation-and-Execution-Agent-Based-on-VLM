@@ -107,7 +107,7 @@ const electronAPI = {
     onTaskFinished: (cb: (d: any) => void) => { const h = (_: any, d: any) => cb(d); ipcRenderer.on("scheduler:taskFinished", h); return () => ipcRenderer.removeListener("scheduler:taskFinished", h); },
   },
   speech: {
-    transcribe: (payload: { audioBase64: string; mimeType?: string }): Promise<{ ok: boolean; text?: string; error?: string }> => ipcRenderer.invoke("speech:transcribe", payload),
+    transcribe: (payload: { audioBase64: string; mimeType?: string; sampleRate?: number; encoding?: "raw" }): Promise<{ ok: boolean; text?: string; error?: string }> => ipcRenderer.invoke("speech:transcribe", payload),
   },
 };
 
